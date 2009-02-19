@@ -49,6 +49,7 @@
 #include <errno.h>
 #include <assert.h>
 #include <math.h>
+#include <termios.h>
 
 #define GL_GLEXT_LEGACY
 #include "mesa_gl.h"
@@ -58,9 +59,11 @@
 #include <dlfcn.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/mman.h>
 #include <pthread.h>
+#include <fcntl.h>
 
 #include <X11/X.h>
 #include <X11/Xutil.h>
@@ -1122,26 +1125,61 @@ static int call_opengl_qemu(int func_number, int pid, void* ret_string, void* ar
 #endif
 }
 
+#define SERIAL_COMM_SUPPORT
+static int use_uart_comm = 1;
+static int uart_comm_fd;
+#ifdef SERIAL_COMM_SUPPORT
+static int call_opengl_uart(int func_number, int pid,
+        void *ret_string, void *args, void *args_size)
+{
+  char cmd[17];
+  uint64_t params[5] = {
+    func_number,
+    pid,
+    (long unsigned int) ret_string,
+    (long unsigned int) args,
+    (long unsigned int) args_size,
+  };
 
-#ifdef TCP_COMMUNICATION_SUPPORT
-static int use_tcp_communication = 0;
-static int call_opengl(int func_number, int pid, void* ret_string, void* args, void* args_size)
-{
-  if (!use_tcp_communication)
-    return call_opengl_qemu(func_number, pid, ret_string, args, args_size);
-  else
-    return call_opengl_tcp(func_number, pid, ret_string, args, args_size);
+  sprintf(cmd, "%016llx", (long long unsigned int) (long unsigned int) params);
+
+  write(uart_comm_fd, cmd, 16);
+  return (int) params[0];
 }
-#else
-static int call_opengl(int func_number, int pid, void* ret_string, void* args, void* args_size)
+
+static void opengl_uart_init(void)
 {
-  return call_opengl_qemu(func_number, pid, ret_string, args, args_size);
+  struct termios tios;
+  uart_comm_fd = open("/dev/ttyS1", O_RDWR | O_NOCTTY | O_SYNC);
+  cfmakeraw(&tios);
+  tcsetattr(uart_comm_fd, TCSAFLUSH, &tios);
 }
 #endif
 
+#ifdef TCP_COMMUNICATION_SUPPORT
+static int use_tcp_communication = 0;
+#endif
+static int call_opengl(int func_number, int pid, void* ret_string, void* args, void* args_size)
+{
+#ifdef SERIAL_COMM_SUPPORT
+  if (use_uart_comm)
+    return call_opengl_uart(func_number, pid, ret_string, args, args_size);
+  else
+#endif
+#ifdef TCP_COMMUNICATION_SUPPORT
+  if (use_tcp_communication)
+    return call_opengl_tcp(func_number, pid, ret_string, args, args_size);
+  else
+#endif
+    return call_opengl_qemu(func_number, pid, ret_string, args, args_size);
+}
 
 static void do_init()
 {
+#ifdef SERIAL_COMM_SUPPORT
+  if (use_uart_comm)
+    opengl_uart_init();
+#endif
 #ifdef TCP_COMMUNICATION_SUPPORT
   if (use_tcp_communication)
   {
@@ -12016,6 +12054,4 @@ WINGDIAPI const char* WINAPI wglGetExtensionsStringARB(HDC hdc)
 
   return extensions;
 }
-
-
 #endif
