@@ -50,6 +50,7 @@
 #include <assert.h>
 #include <math.h>
 #include <termios.h>
+#include <sys/io.h>
 
 #define GL_GLEXT_LEGACY
 #include "mesa_gl.h"
@@ -1125,10 +1126,10 @@ static int call_opengl_qemu(int func_number, int pid, void* ret_string, void* ar
 #endif
 }
 
-#define SERIAL_COMM_SUPPORT
+#undef SERIAL_COMM_SUPPORT
+#ifdef SERIAL_COMM_SUPPORT
 static int use_uart_comm = 1;
 static int uart_comm_fd;
-#ifdef SERIAL_COMM_SUPPORT
 static int call_opengl_uart(int func_number, int pid,
         void *ret_string, void *args, void *args_size)
 {
@@ -1156,11 +1157,174 @@ static void opengl_uart_init(void)
 }
 #endif
 
+#define IO_COMM_SUPPORT
+#ifdef IO_COMM_SUPPORT
+static int use_io_comm = 1;
+static uint64_t volatile params[6] __attribute__ ((aligned (0x40)));
+static uint32_t ptr = (uint32_t) (unsigned long int) params;
+static int call_opengl_io(int func_number, int pid,
+        void *ret_string, void *args, void *args_size)
+{
+#ifdef USE_REGS
+#if defined(__i386__)
+  int ret;
+#ifdef WIN32
+  __asm__ ("pushl %0;pushl %%fs:0;movl %%esp,%%fs:0;" : : "g" (win32_sigsegv_handler));
+#endif
+  __asm__ ("push %ebx");
+  __asm__ ("push %ecx");
+  __asm__ ("push %edx");
+  __asm__ ("push %esi");
+  __asm__ ("push %edi");
+  __asm__ ("mov %0, %%eax"::"m"(func_number));
+  __asm__ ("mov %0, %%ebx"::"m"(pid));
+  __asm__ ("mov %0, %%ecx"::"m"(ret_string));
+  __asm__ ("mov $0x270f, %edx");
+  __asm__ ("mov %0, %%esi"::"m"(args));
+  __asm__ ("mov %0, %%edi"::"m"(args_size));
+  __asm__ ("out %al,(%dx)");
+  __asm__ ("pop %edi");
+  __asm__ ("pop %esi");
+  __asm__ ("pop %edx");
+  __asm__ ("pop %ecx");
+  __asm__ ("pop %ebx");
+  __asm__ ("mov %%eax, %0"::"m"(ret));
+#ifdef WIN32
+  __asm__ ("movl (%%esp),%%ecx;movl %%ecx,%%fs:0;addl $8,%%esp;" : : : "%ecx");
+#endif
+  return ret;
+#elif defined(__x86_64__)
+  int ret;
+  __asm__ ("push %rbx");
+  __asm__ ("push %rcx");
+  __asm__ ("push %rdx");
+  __asm__ ("push %rsi");
+  __asm__ ("push %rdi");
+  __asm__ ("mov %0, %%eax"::"m"(func_number));
+  __asm__ ("mov %0, %%ebx"::"m"(pid));
+  __asm__ ("mov %0, %%rcx"::"m"(ret_string));
+  __asm__ ("mov $0x270f, %rdx");
+  __asm__ ("mov %0, %%rsi"::"m"(args));
+  __asm__ ("mov %0, %%rdi"::"m"(args_size));
+  __asm__ ("out %al,(%dx)");
+  __asm__ ("pop %rdi");
+  __asm__ ("pop %rsi");
+  __asm__ ("pop %rdx");
+  __asm__ ("pop %rcx");
+  __asm__ ("pop %rbx");
+  __asm__ ("mov %%eax, %0"::"m"(ret));
+  return ret;
+#else
+  fprintf(stderr, "unsupported architecture!\n");
+  return 0;
+#endif
+#else
+  params[0] = func_number;
+  params[1] = pid;
+  params[2] = (long unsigned int) ret_string;
+  params[3] = (long unsigned int) args;
+  params[4] = (long unsigned int) args_size;
+  params[5] = -1;
+
+#if defined(__i386__) || defined(__x86_64__)
+#ifdef WIN32
+  __asm__ volatile ("pushl %0;pushl %%fs:0;movl %%esp,%%fs:0;" :: "g"(win32_sigsegv_handler));
+#endif
+  __asm__ volatile ("mov  %0, %%eax" :: "m"(ptr) : "eax", "rax");
+  __asm__ volatile ("mov  $0x270c, %%edx" ::: "edx", "rdx");
+  __asm__ volatile ("outl %eax,(%dx)");
+#ifdef WIN32
+  __asm__ volatile ("movl (%%esp),%%ecx;movl %%ecx,%%fs:0;addl $8,%%esp;" ::: "%ecx");
+#endif
+#else
+  fprintf(stderr, "unsupported architecture!\n");
+#endif
+#define unlikely(x) __builtin_expect(!!(x), 0)
+  if (unlikely(params[5])) {
+    fprintf(stderr, "call failed!\n");
+    exit(-1);
+  }
+
+  return (int) params[0];
+#endif
+}
+
+static void opengl_io_init(void)
+{
+  struct termios tios;
+  int fd;
+
+  fd = open("/dev/ttyS1", O_RDWR | O_NOCTTY | O_SYNC);
+  cfmakeraw(&tios);
+  tcsetattr(fd, TCSAFLUSH, &tios);
+  write(fd, "x", 1);
+  close(fd);
+
+  iopl(3);
+#if 0
+  outb(-1, 9999);
+#else
+  __asm__ volatile ("mov  $-1, %%eax" ::: "eax", "rax");
+  __asm__ volatile ("mov  $0x270c, %%edx" ::: "edx", "rdx");
+  __asm__ volatile ("outl %eax,(%dx)");
+#endif
+}
+#endif
+
+#undef UDP_COMM_SUPPORT
+#ifdef UDP_COMM_SUPPORT
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+static int use_udp_comm = 1;
+static int udp_comm_fd;
+static struct sockaddr_in udp_addr;
+static int call_opengl_udp(int func_number, int pid,
+        void *ret_string, void *args, void *args_size)
+{
+  char cmd[17];
+  volatile uint64_t params[6] = {
+    func_number,
+    pid,
+    (long unsigned int) ret_string,
+    (long unsigned int) args,
+    (long unsigned int) args_size,
+    1
+  };
+
+  sprintf(cmd, "%016llx", (long long unsigned int) (long unsigned int) params);
+
+  sendto(udp_comm_fd, cmd, 16, 0, &udp_addr, sizeof(udp_addr));
+  while (params[5]);
+  return (int) params[0];
+}
+
+static void opengl_udp_init(void)
+{
+  udp_comm_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  memset(&udp_addr, 0, sizeof(udp_addr));
+  udp_addr.sin_family = AF_INET;
+  udp_addr.sin_port = htons(2);
+  inet_aton("10.0.2.6", &udp_addr.sin_addr);
+}
+#endif
+
 #ifdef TCP_COMMUNICATION_SUPPORT
 static int use_tcp_communication = 0;
 #endif
 static int call_opengl(int func_number, int pid, void* ret_string, void* args, void* args_size)
 {
+#ifdef IO_COMM_SUPPORT
+  if (use_io_comm)
+    return call_opengl_io(func_number, pid, ret_string, args, args_size);
+  else
+#endif
+#ifdef UDP_COMM_SUPPORT
+  if (use_udp_comm)
+    return call_opengl_udp(func_number, pid, ret_string, args, args_size);
+  else
+#endif
 #ifdef SERIAL_COMM_SUPPORT
   if (use_uart_comm)
     return call_opengl_uart(func_number, pid, ret_string, args, args_size);
@@ -1176,6 +1340,14 @@ static int call_opengl(int func_number, int pid, void* ret_string, void* args, v
 
 static void do_init()
 {
+#ifdef IO_COMM_SUPPORT
+  if (use_io_comm)
+    opengl_io_init();
+#endif
+#ifdef UDP_COMM_SUPPORT
+  if (use_udp_comm)
+    opengl_udp_init();
+#endif
 #ifdef SERIAL_COMM_SUPPORT
   if (use_uart_comm)
     opengl_uart_init();
