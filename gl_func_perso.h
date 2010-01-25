@@ -2,6 +2,7 @@
  *  Hand-implemented GL/GLX API
  *
  *  Copyright (c) 2006,2007 Even Rouault
+ *  Copyright (c) 2010 Intel
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,12 +25,8 @@
 
 MAGIC_MACRO(_init32),
 MAGIC_MACRO(_init64),
-MAGIC_MACRO(_synchronize),
-MAGIC_MACRO(_serialized_calls),
-MAGIC_MACRO(_exit_process),
-MAGIC_MACRO(_moveResizeWindow),
-MAGIC_MACRO(_changeWindowState),
-MAGIC_MACRO(_send_cursor),
+MAGIC_MACRO(_resize_surface),
+MAGIC_MACRO(_render_surface),
 
 /* When you add a glX call here, you HAVE TO update IS_GLX_CALL */
 MAGIC_MACRO(glXChooseVisual),
@@ -47,20 +44,12 @@ MAGIC_MACRO(glXWaitGL),
 MAGIC_MACRO(glXWaitX),
 MAGIC_MACRO(glXGetFBConfigAttrib_extended),
 MAGIC_MACRO(glXChooseFBConfig),
-MAGIC_MACRO(glXChooseFBConfigSGIX),
 MAGIC_MACRO(glXGetFBConfigs),
-MAGIC_MACRO(glXCreatePbuffer),
-MAGIC_MACRO(glXCreateGLXPbufferSGIX),
-MAGIC_MACRO(glXDestroyPbuffer),
-MAGIC_MACRO(glXDestroyGLXPbufferSGIX),
 MAGIC_MACRO(glXCreateNewContext),
-MAGIC_MACRO(glXCreateContextWithConfigSGIX),
 MAGIC_MACRO(glXGetVisualFromFBConfig),
 MAGIC_MACRO(glXGetFBConfigAttrib),
-MAGIC_MACRO(glXGetFBConfigAttribSGIX),
 MAGIC_MACRO(glXQueryContext),
 MAGIC_MACRO(glXQueryDrawable),
-MAGIC_MACRO(glXQueryGLXPbufferSGIX),
 MAGIC_MACRO(glXUseXFont),
 MAGIC_MACRO(glXIsDirect),
 MAGIC_MACRO(glXGetProcAddress_fake),
@@ -70,10 +59,6 @@ MAGIC_MACRO(glXQueryExtension),
 MAGIC_MACRO(glXGetScreenDriver),
 MAGIC_MACRO(glXGetDriverConfig),
 MAGIC_MACRO(glXSwapIntervalSGI),
-MAGIC_MACRO(glXBindTexImageATI),
-MAGIC_MACRO(glXReleaseTexImageATI),
-MAGIC_MACRO(glXBindTexImageARB),
-MAGIC_MACRO(glXReleaseTexImageARB),
 
 MAGIC_MACRO(glGetString),
 

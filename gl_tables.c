@@ -1,6 +1,7 @@
 /*
- *  Copyright (c) 2007 Even Rouault
- *  Modified by Ian Molton 2010
+ *  Guest-side implementation of GL/GLX API. Replacement of standard libGL.so
+ *
+ *  Copyright (c) 2010 Intel
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,10 +22,8 @@
  * THE SOFTWARE.
  */
 
+#include "opengl_func.h"
+#include "enumtype.h"
 
-#ifndef _OPENGL_UTILS
-#define _OPENGL_UTILS
+#include "gl_func_tabs.h"
 
-extern int compute_arg_length(int func_number, Signature *s, int arg_i, long* args);
-
-#endif

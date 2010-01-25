@@ -1150,10 +1150,12 @@ int main(int argc, char* argv[])
   fclose(f);
 
   FILE* header = fopen("gl_func.h", "w");
+  FILE* table = fopen("gl_func_tabs.h", "w");
   FILE* client_stub = fopen("client_stub.c", "w");
   FILE* server_stub = fopen("server_stub.c", "w");
 
   fprintf(header, "/* This is a generated file. DO NOT EDIT ! */\n\n");
+  fprintf(table, "/* This is a generated file. DO NOT EDIT ! */\n\n");
   fprintf(header, "#define COMPOSE(x,y) x##y\n");
   fprintf(header, "#define MAGIC_MACRO(x)  COMPOSE(x,_func)\n");
   fprintf(header, "enum {\n"
@@ -1267,16 +1269,15 @@ int main(int argc, char* argv[])
   fprintf(server_stub, "  switch(func_number)\n");
   fprintf(server_stub, "  {\n");
 
-
   for(i=0;i<funcDescCount;i++)
   {
     if (funcDesc[i].ok)
     {
-      fprintf(header, "static const int %s_signature[] = { %s, %d, ",
+      fprintf(table, "static const int %s_signature[] = { %s, %d, ",
               funcDesc[i].name,
               get_type_string(funcDesc[i].type),
               funcDesc[i].has_out_parameters);
-      fprintf(header, "%d", funcDesc[i].nargs);
+      fprintf(table, "%d", funcDesc[i].nargs);
       int j;
       char* signature_type_name;
       int n_args_to_check = is_known_arg_vector(&funcDesc[i], &signature_type_name, NULL) ? funcDesc[i].nargs - 1 : funcDesc[i].nargs;
@@ -1285,17 +1286,17 @@ int main(int argc, char* argv[])
       {
         if (is_arg_of_length_depending_on_previous_args(&funcDesc[i], j))
         {
-          fprintf(header, ", %s_OF_LENGTH_DEPENDING_ON_PREVIOUS_ARGS", get_type_string(funcDesc[i].args[j]));
+          fprintf(table, ", %s_OF_LENGTH_DEPENDING_ON_PREVIOUS_ARGS", get_type_string(funcDesc[i].args[j]));
         }
         else
-          fprintf(header, ", %s", get_type_string(funcDesc[i].args[j]));
+          fprintf(table, ", %s", get_type_string(funcDesc[i].args[j]));
       }
 
       if (is_known_arg_vector(&funcDesc[i], &signature_type_name, NULL))
       {
-        fprintf(header, ", %s", signature_type_name);
+        fprintf(table, ", %s", signature_type_name);
       }
-      fprintf(header, "};\n");
+      fprintf(table, "};\n");
 
 
       if (funcDesc[i].just_for_server_side == 0)
@@ -1461,34 +1462,35 @@ int main(int argc, char* argv[])
   fprintf(server_stub, "}\n");
 
   fprintf(header, "#undef MAGIC_MACRO\n");
-  fprintf(header, "#define MAGIC_MACRO(x)  COMPOSE(x,_signature)\n");
-  fprintf(header, "static const int* tab_opengl_calls[GL_N_CALLS] =\n");
-  fprintf(header, "{\n");
-  fprintf(header, "#include \"gl_func_perso.h\"\n");
+  fprintf(table, "#define MAGIC_MACRO(x)  COMPOSE(x,_signature)\n\n");
+  fprintf(table, "const int* tab_opengl_calls[GL_N_CALLS] =\n");
+  fprintf(table, "{\n");
+  fprintf(table, "#include \"gl_func_perso.h\"\n");
   for(i=0;i<funcDescCount;i++)
   {
     if (funcDesc[i].ok)
     {
-      fprintf(header, "  %s_signature,\n", funcDesc[i].name);
+      fprintf(table, "  %s_signature,\n", funcDesc[i].name);
     }
   }
-  fprintf(header, "};\n\n");
+  fprintf(table, "};\n\n");
 
-  fprintf(header, "#undef MAGIC_MACRO\n");
-  fprintf(header, "#define MAGIC_MACRO(x)  #x\n");
-  fprintf(header, "static const char* tab_opengl_calls_name[GL_N_CALLS] =\n");
-  fprintf(header, "{\n");
-  fprintf(header, "#include \"gl_func_perso.h\"\n");
+  fprintf(table, "#undef MAGIC_MACRO\n");
+  fprintf(table, "#define MAGIC_MACRO(x)  #x\n");
+  fprintf(table, "const char* tab_opengl_calls_name[GL_N_CALLS] =\n");
+  fprintf(table, "{\n");
+  fprintf(table, "#include \"gl_func_perso.h\"\n");
   for(i=0;i<funcDescCount;i++)
   {
     if (funcDesc[i].ok)
     {
-      fprintf(header, "  \"%s\",\n", funcDesc[i].name);
+      fprintf(table, "  \"%s\",\n", funcDesc[i].name);
     }
   }
-  fprintf(header, "};\n\n");
+  fprintf(table, "};\n\n");
 
   fclose(header);
+  fclose(table);
   fclose(server_stub);
   fclose(client_stub);
 

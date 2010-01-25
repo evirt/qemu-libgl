@@ -1,6 +1,8 @@
 /*
- *  Copyright (c) 2007 Even Rouault
- *  Modified by Ian Molton 2010
+ *  Guest-side implementation of GL/GLX API. Replacement of standard libGL.so
+ *
+ *  Copyright (c) 2006,2007 Even Rouault
+ *  Copyright (c) 2010 Intel
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,10 +23,33 @@
  * THE SOFTWARE.
  */
 
+#include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
+#include <stdio.h>
 
-#ifndef _OPENGL_UTILS
-#define _OPENGL_UTILS
+FILE* get_err_file()
+{
+  static FILE* err_file = NULL;
+  if (err_file == NULL)
+  {
+    err_file = getenv("GL_ERR_FILE") ? fopen(getenv("GL_ERR_FILE"), "wt") : NULL;
+    if (err_file == NULL)
+      err_file = stderr;
+  }
+  return err_file;
+}
 
-extern int compute_arg_length(int func_number, Signature *s, int arg_i, long* args);
 
+void log_gl(const char* format, ...)
+{
+  va_list list;
+  va_start(list, format);
+#ifdef ENABLE_THREAD_SAFETY
+  if (IS_MT())
+    fprintf(get_err_file(), "[thread %p] : ", (void*)GET_CURRENT_THREAD());
 #endif
+  vfprintf(get_err_file(), format, list);
+  va_end(list);
+}
+

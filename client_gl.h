@@ -1,6 +1,6 @@
 /*
- *  Copyright (c) 2007 Even Rouault
- *  Modified by Ian Molton 2010
+ *  Copyright (c) 2006,2007 Even Rouault
+ *  Copyright (c) 2010 Intel
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,10 +21,11 @@
  * THE SOFTWARE.
  */
 
+extern void glGetIntegerv_no_lock( GLenum pname, GLint *params );
+extern void glPixelStorei_no_lock( GLenum pname, GLint param );
+extern void glBindBufferARB_no_lock (GLenum target, GLuint buffer);
+extern void glReadPixels_no_lock  ( GLint x, GLint y,
+                                    GLsizei width, GLsizei height,
+                                    GLenum format, GLenum type,
+                                    GLvoid *pixels );
 
-#ifndef _OPENGL_UTILS
-#define _OPENGL_UTILS
-
-extern int compute_arg_length(int func_number, Signature *s, int arg_i, long* args);
-
-#endif

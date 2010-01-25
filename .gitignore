@@ -1,0 +1,8 @@
+client_stub.c
+gl_func.h
+glgetv_cst.h
+libGL.so
+parse_gl_h
+gl_func_tabs.h
+parse_mesa_get_c
+*.o

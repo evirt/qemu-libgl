@@ -1,6 +1,6 @@
 /*
- *  Copyright (c) 2007 Even Rouault
- *  Modified by Ian Molton 2010
+ *  Copyright (c) 2006,2007 Even Rouault
+ *  Copyright (c) 2010 Intel
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,10 +21,11 @@
  * THE SOFTWARE.
  */
 
+extern void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* args_size_opt);
 
-#ifndef _OPENGL_UTILS
-#define _OPENGL_UTILS
-
-extern int compute_arg_length(int func_number, Signature *s, int arg_i, long* args);
-
-#endif
+static inline void do_opengl_call(int func_number, void* ret_ptr, long* args, int* args_size_opt)
+{
+  LOCK(func_number);
+  do_opengl_call_no_lock(func_number, ret_ptr, args, args_size_opt);
+  UNLOCK(func_number);
+}

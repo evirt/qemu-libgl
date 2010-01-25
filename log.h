@@ -1,6 +1,6 @@
 /*
- *  Copyright (c) 2007 Even Rouault
- *  Modified by Ian Molton 2010
+ *  Copyright (c) 2006,2007 Even Rouault
+ *  Copyright (c) 2010 Intel
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,10 +21,7 @@
  * THE SOFTWARE.
  */
 
+extern FILE* get_err_file();
 
-#ifndef _OPENGL_UTILS
-#define _OPENGL_UTILS
+extern void log_gl(const char* format, ...);
 
-extern int compute_arg_length(int func_number, Signature *s, int arg_i, long* args);
-
-#endif
