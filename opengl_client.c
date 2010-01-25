@@ -1301,9 +1301,9 @@ static __attribute__((noinline)) int call_opengl_bp(int func_number, int pid,
 
 static uint64_t opengl_get_bp_addr(void)
 {
-  unsigned long int ret;
+  unsigned long int ret = 0;
 
-  __asm__ volatile ("movl $opengl_bp, %0" : "=r" (ret));
+//  __asm__ volatile ("movl $opengl_bp, %0" : "=r" (ret));
 
   return ret;
 }
@@ -1314,7 +1314,7 @@ static void opengl_bp_init(void)
   struct termios tios;
   int fd;
 
-  sprintf(cmd, "%016llx", opengl_get_bp_addr());
+//  sprintf(cmd, "%016llx", opengl_get_bp_addr());
 
   fd = open("/dev/ttyS1", O_RDWR | O_NOCTTY | O_SYNC);
   cfmakeraw(&tios);
@@ -11850,7 +11850,7 @@ static __GLXextFuncPtr glXGetProcAddress_no_lock(const GLubyte * _name)
     tab_assoc = calloc(tabSize, sizeof(AssocProcAdress));
 
 #ifndef WIN32
-    handle = dlopen(getenv("REAL_LIBGL") ? getenv("REAL_LIBGL") : "libGL.so" ,RTLD_LAZY);
+    handle = dlopen(getenv("REAL_LIBGL") ? getenv("REAL_LIBGL") : "libGL.so.1.2" ,RTLD_LAZY);
     if (!handle) {
       log_gl("%s\n", dlerror());
       exit(1);

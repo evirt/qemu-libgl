@@ -1,8 +1,9 @@
+BUILD_CC := gcc
 GL_CFLAGS := -Wall -g -O2 -fno-strict-aliasing
 
-all: libGL.so
+all: libGL.so.1.2
 
-libGL.so: client_stub.c opengl_client.c glgetv_cst.h opengl_func.h opengl_utils.h opengl_client_xfonts.c mesa_gl.h mesa_glext.h mesa_glx.h mesa_glxext.h
+libGL.so.1.2: client_stub.c opengl_client.c glgetv_cst.h opengl_func.h opengl_utils.h opengl_client_xfonts.c mesa_gl.h mesa_glext.h mesa_glx.h mesa_glxext.h
 	$(CC) -fPIC $(GL_CFLAGS) opengl_client.c -shared -o libGL.so -lX11 -lXfixes -lm -L$(D)/usr/X11R6/lib -lpthread -I.
 
 opengl_func.h: gl_func.h
