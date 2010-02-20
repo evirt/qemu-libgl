@@ -80,6 +80,8 @@ WINGDIAPI const char* WINAPI wglGetExtensionsStringARB(HDC hdc);
 
 #define ENABLE_THREAD_SAFETY
 
+#define IO_VIRTIO_SUPPORT
+static int use_io_virtio = 1;
 
 /*void *pthread_getspecific(pthread_key_t key);
        int pthread_setspecific(pthread_key_t key, const void *value);*/
@@ -1076,6 +1078,24 @@ static EXCEPTION_DISPOSITION win32_sigsegv_handler(struct _EXCEPTION_RECORD *exc
 }
 #endif
 
+static char *glbuffer;
+static int glfd;
+
+static inline int call_opengl_virtio(int func_number, void* ret_string, void* args, void* args_size)
+{
+	volatile int *i = (volatile int*)glbuffer;
+	i[0] = func_number;
+	// pid is filled in by the kernel module for virtio
+	i[2] = (int)ret_string;
+	i[3] = (int)args;
+	i[4] = (int)args_size;
+	i[5] = (int)glbuffer;
+
+	fsync(glfd); // Make magic happen
+	
+	return i[0];
+}
+
 static int call_opengl_qemu(int func_number, int pid, void* ret_string, void* args, void* args_size)
 {
 #if defined(__i386__)
@@ -1271,7 +1291,25 @@ static void opengl_io_init(void)
 }
 #endif
 
-#define BP_COMM_SUPPORT
+static void opengl_virtio_init(void)
+{
+	fprintf(stderr, "opengl_virtio_init()\n");
+
+	glfd = open("/dev/vimem", O_RDWR | O_NOCTTY | O_SYNC | O_CLOEXEC);
+	if(glfd == -1) {
+		fprintf(stderr, "Failed to open device\n");
+		exit(1);
+	}
+
+	glbuffer = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, glfd, 0);
+
+	if(glbuffer == MAP_FAILED) {
+		fprintf(stderr, "Failed to map buffer - dying horribly\n");
+		exit(1);
+	}
+}
+
+//#define BP_COMM_SUPPORT
 #ifdef BP_COMM_SUPPORT
 static int use_bp_comm = 1;
 static __attribute__((noinline)) int call_opengl_bp(int func_number, int pid,
@@ -1378,6 +1416,11 @@ static int call_opengl(int func_number, int pid, void* ret_string, void* args, v
     return call_opengl_io(func_number, pid, ret_string, args, args_size);
   else
 #endif
+#ifdef IO_VIRTIO_SUPPORT
+  if(use_io_virtio)
+    return call_opengl_virtio(func_number, ret_string, args, args_size);
+  else
+#endif
 #ifdef UDP_COMM_SUPPORT
   if (use_udp_comm)
     return call_opengl_udp(func_number, pid, ret_string, args, args_size);
@@ -1405,6 +1448,10 @@ static void do_init()
 #ifdef IO_COMM_SUPPORT
   if (use_io_comm)
     opengl_io_init();
+#endif
+#ifdef IO_VIRTIO_SUPPORT
+  if (use_io_virtio)
+    opengl_virtio_init();
 #endif
 #ifdef UDP_COMM_SUPPORT
   if (use_udp_comm)
@@ -1488,48 +1535,48 @@ static void do_init()
 #endif
   {
 #ifndef WIN32
-  struct sigaction action;
-  action.sa_sigaction = sigsegv_handler;
-  sigemptyset(&(action.sa_mask));
-  action.sa_flags = SA_SIGINFO;
-  sigaction(SIGSEGV, &action, &old_action);
+//  struct sigaction action;
+//  action.sa_sigaction = sigsegv_handler;
+//  sigemptyset(&(action.sa_mask));
+//  action.sa_flags = SA_SIGINFO;
+//  sigaction(SIGSEGV, &action, &old_action);
 
-  int parent_pid = getpid();
-  int pid_fork = fork();
-  if (pid_fork == 0)
-  {
+//  int parent_pid = getpid();
+//  int pid_fork = fork();
+//  if (pid_fork == 0)
+//  {
     /* Sorry. This is really ugly, not portable, etc...
         This is the quickest way I've found
         to make sure that someone notices that the main program has stopped
         running and can warn the server */
-    if (fork() != 0) exit(0);
-    setsid();
-    if (fork() != 0) exit(0);
-    fcloseall();
-    chdir("/");
+//    if (fork() != 0) exit(0);
+//    setsid();
+//    if (fork() != 0) exit(0);
+//    fcloseall();
+//    chdir("/");
 
-    char processname[512];
-    sprintf(processname, "/proc/%d", parent_pid);
-    while(1)
-    {
-      struct stat buf;
-      if (lstat(processname, &buf) < 0)
-      {
-        call_opengl(_exit_process_func, parent_pid, NULL, NULL, NULL);
-        exit(0);
-      }
-      sleep(1);
-    }
-  }
-  else if (pid_fork > 0)
-  {
-    log_gl("go on...\n");
-  }
-  else
-  {
-    log_gl("fork failed\n");
-    exit(-1);
-  }
+//    char processname[512];
+//    sprintf(processname, "/proc/%d", parent_pid);
+//    while(1)
+//    {
+//      struct stat buf;
+//      if (lstat(processname, &buf) < 0)
+//      {
+//        call_opengl(_exit_process_func, parent_pid, NULL, NULL, NULL);
+//        exit(0);
+//      }
+//      sleep(1);
+//    }
+//  }
+//  else if (pid_fork > 0)
+//  {
+//    log_gl("go on...\n");
+//  }
+//  else
+//  {
+//    log_gl("fork failed\n");
+//    exit(-1);
+//  }
 #endif
   }
 }
@@ -12088,7 +12135,7 @@ WINGDIAPI BOOL  WINAPI wglDeleteContext         (HGLRC a)
   do_opengl_call(glXDestroyContext_func, NULL, args, NULL);
 
   /* FIXME ! */
-  call_opengl(_exit_process_func, getpid(), NULL, NULL, NULL);
+//  call_opengl(_exit_process_func, getpid(), NULL, NULL, NULL);
 
   return 1;
 }
