@@ -1092,6 +1092,12 @@ static inline int call_opengl_virtio(int func_number, void* ret_string, void* ar
 	i[5] = (int)glbuffer;
 
 	fsync(glfd); // Make magic happen
+
+	if(i[6] == 0xdeadbeef) {
+		fprintf(stderr, "Call failed: func %d   ret: %d\n", func_number, i[0]);
+		*(int*)0 = 0; // Segfault
+		exit(1);
+	}
 	
 	return i[0];
 }
