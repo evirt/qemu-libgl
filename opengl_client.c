@@ -678,6 +678,7 @@ static inline int call_opengl(int func_number, void* ret_string, void* args, voi
 	i[3] = (int)args;
 	i[4] = (int)args_size;
 	i[5] = (int)glbuffer;
+	i[6] = 0;
 
 	fsync(glfd); // Make magic happen
 
@@ -845,18 +846,14 @@ static void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, i
     mlock(command_buffer, SIZE_BUFFER_COMMAND);
 
     int init_ret = 0;
-    long temp_args[] = { getenv("WRITE_GL") != NULL, POINTER_TO_ARG(&init_ret) };
-    int temps_args_size[] = { 0, sizeof(int) };
-    call_opengl(_init_func, NULL, temp_args, temps_args_size);
+    init_ret = call_opengl(_init_func, NULL, NULL, NULL);
     if (init_ret == 0)
     {
       log_gl("You maybe forgot to launch QEMU with -enable-gl argument.\n");
-      {
-        log_gl("exiting !\n");
-        exit(-1);
-      }
+      log_gl("exiting !\n");
+      exit(-1);
     }
-    enable_gl_buffering = (init_ret == 2) || (getenv("ENABLE_GL_BUFFERING") != NULL);
+    enable_gl_buffering = (init_ret == 2) && (getenv("ENABLE_GL_BUFFERING") != NULL);
   }
 
   if (exists_on_server_side[func_number] == -1)
@@ -1006,7 +1003,7 @@ static void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, i
   if (debug_gl) display_gl_call(get_err_file(), func_number, args, args_size);
 
   if (enable_gl_buffering && signature->ret_type == TYPE_NONE && signature->has_out_parameters == 0 &&
-      func_number != _exit_process_func && !(func_number == glXSwapBuffers_func || func_number == glFlush_func || func_number == glFinish_func))
+      !(func_number == glXSwapBuffers_func || func_number == glFlush_func || func_number == glFinish_func))
   {
     assert(ret_ptr == NULL);
     if (this_func_parameter_size + command_buffer_size >= SIZE_BUFFER_COMMAND)
