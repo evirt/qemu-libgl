@@ -22,8 +22,6 @@
  * THE SOFTWARE.
  */
 
-/* This library can also be used independly of qemu as a TCP/IP client with the opengl_server TCP/IP server */
-
 /* gcc -Wall -g -O2 opengl_client.c -shared -o libGL.so.1 */
 
 /* Windows compilations instructions */
@@ -35,8 +33,6 @@
 
 /* objdump -T ../i386-softmmu/libGL.so | grep Base | awk '{print $7}' | grep gl | sort > opengl32_temp.def */
 
-
-/*  HACK_XGL=true USE_TCP_COMMUNICATION=1 LD_LIBRARY_PATH=/home/even/qemu/cvs280207/qemu/i386-softmmu:/home/even/cairo/glitz-0.5.6/src/glx/.libs/:/home/even/cairo/glitz-0.5.6/src/.libsvalgrind Xgl -screen 800x600 :10 -ac */
 
 #define _GNU_SOURCE
 #define _XOPEN_SOURCE 600
@@ -81,7 +77,6 @@ static int use_io_virtio = 1;
 
 #define CHECK_ARGS(x, y) (1 / ((sizeof(x)/sizeof(x[0])) == (sizeof(y)/sizeof(y[0])) ? 1 : 0)) ? x : x, y
 
-#define TCP_COMMUNICATION_SUPPORT
 //#define PROVIDE_STUB_IMPLEMENTATION
 
 #define NOT_IMPLEMENTED(x) log_gl(#x " not implemented !\n")
@@ -90,7 +85,6 @@ static void log_gl(const char* format, ...);
 
 static const char* interestingEnvVars[] =
 {
-  "USE_TCP_COMMUNICATION",   /* default : not set */
   "GET_IMG_FROM_SERVER",     /* default : not set */ /* unsupported for Win32 guest */
   "GL_SERVER",               /* default is localhost */
   "GL_SERVER_PORT",          /* default is 5555 */
@@ -100,8 +94,7 @@ static const char* interestingEnvVars[] =
   "DEBUG_ARRAY_PTR",         /* default : not set */
   "DISABLE_OPTIM",           /* default : not set */
   "LIMIT_FPS",               /* default : not set */ /* unsupported for Win32 guest */
-  "ENABLE_GL_BUFFERING",     /* default : set if TCP/IP communication or KQEMU detected */
-  "NO_MOVE",                 /* default : set if TCP/IP communication */
+  "ENABLE_GL_BUFFERING",     /* default : set if ??? detected */
 };
 
 #define EXT_FUNC(x) x
@@ -679,226 +672,6 @@ static int debug_array_ptr = 0;
 static int disable_optim = 0;
 static int limit_fps = 0;
 
-#ifdef TCP_COMMUNICATION_SUPPORT
-
-#define PORT    5555
-
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <netinet/tcp.h>
-#include <arpa/inet.h>
-static int sock;
-
-
-static void
-init_sockaddr (struct sockaddr_in *name,
-              const char *hostname,
-              uint16_t port)
-{
-  struct hostent *hostinfo;
-  name->sin_family = AF_INET;
-  name->sin_port = htons (port);
-  name->sin_addr.s_addr  = inet_addr(hostname);
-  if (name->sin_addr.s_addr != INADDR_NONE)
-    return;
-  hostinfo = gethostbyname (hostname);
-  if (hostinfo == NULL)
-  {
-    log_gl("Unknown host %s.\n", hostname);
-    exit (EXIT_FAILURE);
-  }
-  name->sin_addr = *(struct in_addr *) hostinfo->h_addr;
-}
-
-static int total_written = 0;
-static void write_sock_data(void* data, int len)
-{
-  if (len && data)
-  {
-    int offset = 0;
-    //if (debug_gl) log_gl("to write : %d\n", len);
-    while(offset < len)
-    {
-      int nwritten = write(sock, data + offset, len - offset);
-      if (nwritten == -1)
-      {
-        if (errno == EINTR)
-          continue;
-        perror("write");
-        assert(nwritten != -1);
-      }
-      offset += nwritten;
-      total_written += nwritten;
-      /*if (debug_gl)
-        log_gl("total written : %d\n", total_written);
-      if (debug_gl && offset < len) log_gl("remaining to write : %d\n", len - offset);*/
-    }
-  }
-}
-
-static void inline write_sock_int(int my_int)
-{
-  write_sock_data(&my_int, sizeof(int));
-}
-
-static void inline write_sock_short(short my_int)
-{
-  write_sock_data(&my_int, sizeof(short));
-}
-
-static void read_sock_data(void* data, int len)
-{
-  if (len && data)
-  {
-    int offset = 0;
-    while(offset < len)
-    {
-      int nread = read(sock, data + offset, len - offset);
-      if (nread == -1)
-      {
-        if (errno == EINTR)
-          continue;
-        perror("read");
-        assert(nread != -1);
-      }
-      offset += nread;
-    }
-  }
-}
-
-static int inline read_sock_int()
-{
-  int ret;
-  read_sock_data(&ret, sizeof(int));
-  return ret;
-}
-
-static int call_opengl_tcp(int func_number, int pid, void* ret_string, void* _args, void* _args_size)
-{
-  int ret;
-  Signature* signature = (Signature*)tab_opengl_calls[func_number];
-  int nb_args = signature->nb_args;
-  int i;
-  long* args = (long*)_args;
-  int* args_size = (int*)_args_size;
-  int* args_type = signature->args_type;
-
-
-  write_sock_short(func_number);
-  for(i=0;i<nb_args;i++)
-  {
-    switch(args_type[i])
-    {
-      case TYPE_UNSIGNED_INT:
-      case TYPE_INT:
-      case TYPE_UNSIGNED_CHAR:
-      case TYPE_CHAR:
-      case TYPE_UNSIGNED_SHORT:
-      case TYPE_SHORT:
-      case TYPE_FLOAT:
-      {
-        write_sock_int(args[i]);
-        break;
-      }
-
-      case TYPE_ARRAY_DOUBLE:
-      case TYPE_ARRAY_CHAR:
-      case TYPE_ARRAY_INT:
-      case TYPE_ARRAY_FLOAT:
-      case TYPE_NULL_TERMINATED_STRING:
-      {
-        write_sock_int(args_size[i]);
-        write_sock_data((void*)args[i], args_size[i]);
-        break;
-      }
-
-      CASE_IN_LENGTH_DEPENDING_ON_PREVIOUS_ARGS:
-      {
-        int size = compute_arg_length(get_err_file(), func_number, i, args);
-        if (size < 0)
-          log_gl("TYPE_ARRAY_OF_LENGTH_DEPENDING_ON_PREVIOUS_ARGS : length = %d\n", size);
-        else
-          write_sock_data((void*)args[i], size);
-        break;
-      }
-
-      case TYPE_DOUBLE:
-      CASE_IN_KNOWN_SIZE_POINTERS:
-      {
-        write_sock_data((void*)args[i], args_size[i]);
-        break;
-      }
-
-      case TYPE_IN_IGNORED_POINTER:
-      {
-        break;
-      }
-
-      CASE_OUT_LENGTH_DEPENDING_ON_PREVIOUS_ARGS:
-      CASE_OUT_KNOWN_SIZE_POINTERS:
-      {
-        break;
-      }
-
-      CASE_OUT_UNKNOWN_SIZE_POINTERS:
-      {
-        write_sock_int((args[i]) ? args_size[i] : 0);
-        break;
-      }
-
-      default:
-      {
-        log_gl("(0) unexpected arg type %d at i=%d\n", args_type[i], i);
-        exit(-1);
-        break;
-      }
-    }
-  }
-
-  if (signature->has_out_parameters)
-  {
-    for(i=0;i<nb_args;i++)
-    {
-      switch(args_type[i])
-      {
-        CASE_OUT_POINTERS:
-        {
-          read_sock_data((void*)args[i], args_size[i]);
-          break;
-        }
-
-        default:
-        {
-          break;
-        }
-      }
-    }
-  }
-
-  if (signature->ret_type == TYPE_CONST_CHAR)
-  {
-    int len = read_sock_int();
-    read_sock_data(ret_string, len);
-    ret = 0;
-  }
-  else if (signature->ret_type != TYPE_NONE)
-  {
-    ret = read_sock_int();
-  }
-  else
-  {
-    ret = 0;
-  }
-
-  return ret;
-}
-#endif
-
 static char *glbuffer;
 static int glfd;
 
@@ -967,37 +740,6 @@ static int call_opengl_qemu(int func_number, int pid, void* ret_string, void* ar
 #endif
 }
 
-#undef SERIAL_COMM_SUPPORT
-#ifdef SERIAL_COMM_SUPPORT
-static int use_uart_comm = 1;
-static int uart_comm_fd;
-static int call_opengl_uart(int func_number, int pid,
-        void *ret_string, void *args, void *args_size)
-{
-  char cmd[17];
-  uint64_t params[5] = {
-    func_number,
-    pid,
-    (long unsigned int) ret_string,
-    (long unsigned int) args,
-    (long unsigned int) args_size,
-  };
-
-  sprintf(cmd, "%016llx", (long long unsigned int) (long unsigned int) params);
-
-  write(uart_comm_fd, cmd, 16);
-  return (int) params[0];
-}
-
-static void opengl_uart_init(void)
-{
-  struct termios tios;
-  uart_comm_fd = open("/dev/ttyS1", O_RDWR | O_NOCTTY | O_SYNC);
-  cfmakeraw(&tios);
-  tcsetattr(uart_comm_fd, TCSAFLUSH, &tios);
-}
-#endif
-
 static void opengl_virtio_init(void)
 {
 	fprintf(stderr, "opengl_virtio_init()\n");
@@ -1016,24 +758,11 @@ static void opengl_virtio_init(void)
 	}
 }
 
-#ifdef TCP_COMMUNICATION_SUPPORT
-static int use_tcp_communication = 0;
-#endif
 static int call_opengl(int func_number, int pid, void* ret_string, void* args, void* args_size)
 {
 #ifdef IO_VIRTIO_SUPPORT
   if(use_io_virtio)
     return call_opengl_virtio(func_number, ret_string, args, args_size);
-  else
-#endif
-#ifdef SERIAL_COMM_SUPPORT
-  if (use_uart_comm)
-    return call_opengl_uart(func_number, pid, ret_string, args, args_size);
-  else
-#endif
-#ifdef TCP_COMMUNICATION_SUPPORT
-  if (use_tcp_communication)
-    return call_opengl_tcp(func_number, pid, ret_string, args, args_size);
   else
 #endif
     return call_opengl_qemu(func_number, pid, ret_string, args, args_size);
@@ -1044,53 +773,6 @@ static void do_init()
 #ifdef IO_VIRTIO_SUPPORT
   if (use_io_virtio)
     opengl_virtio_init();
-#endif
-#ifdef SERIAL_COMM_SUPPORT
-  if (use_uart_comm)
-    opengl_uart_init();
-#endif
-#ifdef TCP_COMMUNICATION_SUPPORT
-  if (use_tcp_communication)
-  {
-    struct sockaddr_in servername;
-    /* Create the socket. */
-    sock = socket (AF_INET, SOCK_STREAM,
-                   IPPROTO_TCP
-                  );
-    if (sock < 0)
-    {
-      perror ("socket (client)");
-      exit (EXIT_FAILURE);
-    }
-
-    /* Connect to the server. */
-    int port = PORT;
-    if (getenv("GL_SERVER_PORT"))
-      port = atoi(getenv("GL_SERVER_PORT"));
-    init_sockaddr (&servername, getenv("GL_SERVER") ? getenv("GL_SERVER") : "localhost", port);
-
-    int flag = 1;
-    if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY,(char *)&flag, sizeof(int)) != 0)
-    {
-      perror("setsockopt TCP_NODELAY");
-    }
-    if (setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE,(char *)&flag, sizeof(int)) != 0)
-    {
-      perror("setsockopt SO_KEEPALIVE");
-    }
-
-    if (0 > connect (sock,
-                    (struct sockaddr *) &servername,
-                    sizeof (servername)))
-    {
-      perror ("impossible to connect to server");
-      exit (EXIT_FAILURE);
-    }
-
-    setenv("ENABLE_GL_BUFFERING", "1", 1);
-    setenv("NO_MOVE", "1", 1);
-  }
-  else
 #endif
   {
 //  struct sigaction action;
@@ -1259,9 +941,6 @@ static void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, i
 
     last_current_thread = current_thread;
 
-#ifdef TCP_COMMUNICATION_SUPPORT
-    use_tcp_communication = getenv("USE_TCP_COMMUNICATION") != NULL;
-#endif
     do_init();
 
     pagesize = getpagesize();
@@ -1284,21 +963,6 @@ static void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, i
     if (init_ret == 0)
     {
       log_gl("You maybe forgot to launch QEMU with -enable-gl argument.\n");
-#ifdef TCP_COMMUNICATION_SUPPORT
-      if (getenv("USE_TCP_COMMUNICATION") == NULL)
-      {
-        log_gl("Trying TCP/IP communication instead\n");
-        use_tcp_communication = 1;
-        do_init();
-        call_opengl(_init_func, getpid(), NULL, temp_args, temps_args_size);
-        if (init_ret == 0)
-        {
-          log_gl("exiting !\n");
-          exit(-1);
-        }
-      }
-      else
-#endif
       {
         log_gl("exiting !\n");
         exit(-1);
@@ -3799,11 +3463,6 @@ static void _move_win_if_necessary(Display *dpy, Window win)
     }
     memcpy(&state->oldPos, &pos, sizeof(state->oldPos));
     long args[] = { INT_TO_ARG(win), POINTER_TO_ARG(&pos) };
-    if (getenv("NO_MOVE"))
-    {
-      pos.x = 0;
-      pos.y = 0;
-    }
     do_opengl_call_no_lock(_moveResizeWindow_func, NULL, args, NULL);
   }
 }
