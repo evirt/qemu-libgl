@@ -1016,45 +1016,6 @@ static void opengl_virtio_init(void)
 	}
 }
 
-#undef UDP_COMM_SUPPORT
-#ifdef UDP_COMM_SUPPORT
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-static int use_udp_comm = 1;
-static int udp_comm_fd;
-static struct sockaddr_in udp_addr;
-static int call_opengl_udp(int func_number, int pid,
-        void *ret_string, void *args, void *args_size)
-{
-  char cmd[17];
-  volatile uint64_t params[6] = {
-    func_number,
-    pid,
-    (long unsigned int) ret_string,
-    (long unsigned int) args,
-    (long unsigned int) args_size,
-    1
-  };
-
-  sprintf(cmd, "%016llx", (long long unsigned int) (long unsigned int) params);
-
-  sendto(udp_comm_fd, cmd, 16, 0, &udp_addr, sizeof(udp_addr));
-  while (params[5]);
-  return (int) params[0];
-}
-
-static void opengl_udp_init(void)
-{
-  udp_comm_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  memset(&udp_addr, 0, sizeof(udp_addr));
-  udp_addr.sin_family = AF_INET;
-  udp_addr.sin_port = htons(2);
-  inet_aton("10.0.2.6", &udp_addr.sin_addr);
-}
-#endif
-
 #ifdef TCP_COMMUNICATION_SUPPORT
 static int use_tcp_communication = 0;
 #endif
@@ -1063,11 +1024,6 @@ static int call_opengl(int func_number, int pid, void* ret_string, void* args, v
 #ifdef IO_VIRTIO_SUPPORT
   if(use_io_virtio)
     return call_opengl_virtio(func_number, ret_string, args, args_size);
-  else
-#endif
-#ifdef UDP_COMM_SUPPORT
-  if (use_udp_comm)
-    return call_opengl_udp(func_number, pid, ret_string, args, args_size);
   else
 #endif
 #ifdef SERIAL_COMM_SUPPORT
@@ -1088,10 +1044,6 @@ static void do_init()
 #ifdef IO_VIRTIO_SUPPORT
   if (use_io_virtio)
     opengl_virtio_init();
-#endif
-#ifdef UDP_COMM_SUPPORT
-  if (use_udp_comm)
-    opengl_udp_init();
 #endif
 #ifdef SERIAL_COMM_SUPPORT
   if (use_uart_comm)
