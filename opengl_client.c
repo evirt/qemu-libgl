@@ -696,50 +696,6 @@ static inline int call_opengl_virtio(int func_number, void* ret_string, void* ar
 	return i[0];
 }
 
-static int call_opengl_qemu(int func_number, int pid, void* ret_string, void* args, void* args_size)
-{
-#if defined(__i386__)
-  int ret;
-  __asm__ ("push %ebx");
-  __asm__ ("push %ecx");
-  __asm__ ("push %edx");
-  __asm__ ("push %esi");
-  __asm__ ("mov %0, %%eax"::"m"(func_number));
-  __asm__ ("mov %0, %%ebx"::"m"(pid));
-  __asm__ ("mov %0, %%ecx"::"m"(ret_string));
-  __asm__ ("mov %0, %%edx"::"m"(args));
-  __asm__ ("mov %0, %%esi"::"m"(args_size));
-  __asm__ ("int $0x99");
-  __asm__ ("pop %esi");
-  __asm__ ("pop %edx");
-  __asm__ ("pop %ecx");
-  __asm__ ("pop %ebx");
-  __asm__ ("mov %%eax, %0"::"m"(ret));
-  return ret;
-#elif defined(__x86_64__)
-  int ret;
-  __asm__ ("push %rbx");
-  __asm__ ("push %rcx");
-  __asm__ ("push %rdx");
-  __asm__ ("push %rsi");
-  __asm__ ("mov %0, %%eax"::"m"(func_number));
-  __asm__ ("mov %0, %%ebx"::"m"(pid));
-  __asm__ ("mov %0, %%rcx"::"m"(ret_string));
-  __asm__ ("mov %0, %%rdx"::"m"(args));
-  __asm__ ("mov %0, %%rsi"::"m"(args_size));
-  __asm__ ("int $0x99");
-  __asm__ ("pop %rsi");
-  __asm__ ("pop %rdx");
-  __asm__ ("pop %rcx");
-  __asm__ ("pop %rbx");
-  __asm__ ("mov %%eax, %0"::"m"(ret));
-  return ret;
-#else
-  fprintf(stderr, "unsupported architecture!\n");
-  return 0;
-#endif
-}
-
 static void opengl_virtio_init(void)
 {
 	fprintf(stderr, "opengl_virtio_init()\n");
@@ -763,9 +719,7 @@ static int call_opengl(int func_number, int pid, void* ret_string, void* args, v
 #ifdef IO_VIRTIO_SUPPORT
   if(use_io_virtio)
     return call_opengl_virtio(func_number, ret_string, args, args_size);
-  else
 #endif
-    return call_opengl_qemu(func_number, pid, ret_string, args, args_size);
 }
 
 static void do_init()
