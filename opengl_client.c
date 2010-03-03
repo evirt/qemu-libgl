@@ -1016,59 +1016,6 @@ static void opengl_virtio_init(void)
 	}
 }
 
-//#define BP_COMM_SUPPORT
-#ifdef BP_COMM_SUPPORT
-static int use_bp_comm = 1;
-static __attribute__((noinline)) int call_opengl_bp(int func_number, int pid,
-        void *ret_string, void *args, void *args_size)
-{
-#if defined(__i386__)
-  register unsigned long int ax asm ("eax") = func_number;
-  register unsigned long int bx asm ("edx") = pid;
-  register unsigned long int cx asm ("ecx") = (long int) ret_string;
-  register unsigned long int dx asm ("edx") = (long int) args;
-  register unsigned long int si asm ("esi") = (long int) args_size;
-#elif defined(__x86_64__)
-  register unsigned long int ax asm ("rax") = func_number;
-  register unsigned long int bx asm ("rdx") = pid;
-  register unsigned long int cx asm ("rcx") = (long int) ret_string;
-  register unsigned long int dx asm ("rdx") = (long int) args;
-  register unsigned long int si asm ("rsi") = (long int) args_size;
-#else
-#error Unsupported architecture
-#endif
-
-  asm volatile ("opengl_bp:");
-  asm volatile ("int $0x99" : "=r" (ax) : "r" (ax), "r" (bx), "r" (cx), "r" (dx), "r" (si));
-
-  return ax;
-}
-
-static uint64_t opengl_get_bp_addr(void)
-{
-  unsigned long int ret = 0;
-
-//  __asm__ volatile ("movl $opengl_bp, %0" : "=r" (ret));
-
-  return ret;
-}
-
-static void opengl_bp_init(void)
-{
-  char cmd[17];
-  struct termios tios;
-  int fd;
-
-//  sprintf(cmd, "%016llx", opengl_get_bp_addr());
-
-  fd = open("/dev/ttyS1", O_RDWR | O_NOCTTY | O_SYNC);
-  cfmakeraw(&tios);
-  tcsetattr(fd, TCSAFLUSH, &tios);
-  write(fd, cmd, 16);
-  close(fd);
-}
-#endif
-
 #undef UDP_COMM_SUPPORT
 #ifdef UDP_COMM_SUPPORT
 #include <arpa/inet.h>
@@ -1113,11 +1060,6 @@ static int use_tcp_communication = 0;
 #endif
 static int call_opengl(int func_number, int pid, void* ret_string, void* args, void* args_size)
 {
-#ifdef BP_COMM_SUPPORT
-  if (use_bp_comm)
-    return call_opengl_bp(func_number, pid, ret_string, args, args_size);
-  else
-#endif
 #ifdef IO_VIRTIO_SUPPORT
   if(use_io_virtio)
     return call_opengl_virtio(func_number, ret_string, args, args_size);
@@ -1143,10 +1085,6 @@ static int call_opengl(int func_number, int pid, void* ret_string, void* args, v
 
 static void do_init()
 {
-#ifdef BP_COMM_SUPPORT
-  if (use_bp_comm)
-    opengl_bp_init();
-#endif
 #ifdef IO_VIRTIO_SUPPORT
   if (use_io_virtio)
     opengl_virtio_init();
