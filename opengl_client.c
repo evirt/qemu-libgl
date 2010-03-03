@@ -56,7 +56,6 @@
 #include "mesa_gl.h"
 #include "mesa_glext.h"
 
-#ifndef WIN32
 #include <dlfcn.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -71,12 +70,6 @@
 #include <X11/extensions/Xfixes.h>
 
 #include <mesa_glx.h>
-#else
-#include <excpt.h>
-#include <windows.h>
-WINGDIAPI const char* WINAPI wglGetExtensionsStringARB(HDC hdc);
-#endif
-
 
 #define ENABLE_THREAD_SAFETY
 
@@ -111,62 +104,12 @@ static const char* interestingEnvVars[] =
   "NO_MOVE",                 /* default : set if TCP/IP communication */
 };
 
-
-#ifdef WIN32
-
-typedef struct
-{
-  char* name;
-  char* value;
-} EnvVarStruct;
-
-static int nbEnvVar = 0;
-static EnvVarStruct* envVar = NULL;
-
-const char* my_getenv(const char* name)
-{
-  int i;
-  for(i=0;i<nbEnvVar;i++)
-  {
-    if (strcmp(envVar[i].name, name) == 0)
-      return envVar[i].value;
-  }
-  return getenv(name);
-}
-
-void my_setenv(const char* name, const char* value, int ignored)
-{
-  int i;
-  for(i=0;i<nbEnvVar;i++)
-  {
-    if (strcmp(envVar[i].name, name) == 0)
-    {
-      free(envVar[i].value);
-      envVar[i].value = strdup(value);
-      return;
-    }
-  }
-  envVar = (EnvVarStruct*)realloc(envVar, sizeof(EnvVarStruct) * (nbEnvVar + 1));
-  envVar[nbEnvVar].name = strdup(name);
-  envVar[nbEnvVar].value = strdup(value);
-  nbEnvVar++;
-}
-
-#define getenv my_getenv
-#define setenv my_setenv
-
-#endif
-
 #define EXT_FUNC(x) x
 
 #define CONCAT(a, b) a##b
 #define DEFINE_EXT(glFunc, paramsDecl, paramsCall)  GLAPI void APIENTRY CONCAT(glFunc,EXT) paramsDecl { glFunc paramsCall; }
 
-#ifdef WIN32
-#define portableGetProcAddress wglGetProcAddress
-#else
 #define portableGetProcAddress glXGetProcAddress
-#endif
 
 #ifndef MIN
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
@@ -402,7 +345,6 @@ typedef struct
 typedef struct
 {
   int ref;
-#ifndef WIN32
   Display* display;
   GLXContext context;
   GLXDrawable current_drawable;
@@ -411,7 +353,7 @@ typedef struct
   GLXContext shareList;
   XFixesCursorImage last_cursor;
   GLXPbuffer pbuffer;
-#endif
+
   int isAssociatedToFBConfigVisual;
 
   ClientState client_state_stack[MAX_CLIENT_STATE_STACK_SIZE];
@@ -518,7 +460,6 @@ static GLState** glstates = NULL;
 /* Posix threading */
 /* The concepts used here are coming directly from http://www.mesa3d.org/dispatch.html */
 
-#ifndef WIN32
 static pthread_mutex_t global_mutex         = PTHREAD_MUTEX_INITIALIZER;
 static pthread_key_t   key_current_gl_state;
 #define GET_CURRENT_THREAD()  pthread_self()
@@ -555,6 +496,7 @@ static GLState* _mono_threaded_current_gl_state = NULL;
   #define LOCK(func_number) do { if (IS_GLX_CALL(func_number)) { pthread_mutex_lock( &global_mutex ); IS_MT(); } else if (_is_mt) {  pthread_mutex_lock( &global_mutex ); } } while(0)
   #define UNLOCK(func_number) do { if (IS_GLX_CALL(func_number) || _is_mt) pthread_mutex_unlock( &global_mutex ); } while(0)
 #endif
+
 static void set_current_state(GLState* current_gl_state)
 {
   if (_is_mt)
@@ -562,6 +504,7 @@ static void set_current_state(GLState* current_gl_state)
   else
     _mono_threaded_current_gl_state = current_gl_state;
 }
+
 static inline GLState* get_current_state()
 {
   GLState* current_gl_state;
@@ -585,29 +528,6 @@ static inline GLState* get_current_state()
   return current_gl_state;
 }
 #define SET_CURRENT_STATE(_x) set_current_state(_x)
-
-/* Win32 threading : TODO !*/
-
-#else
-#define LOCK(func_number)
-#define UNLOCK(func_number)
-#define GET_CURRENT_THREAD() 0
-#define IS_MT() 0
-static GLState* current_gl_state = NULL;
-static inline GLState* get_current_state()
-{
-  if (current_gl_state == NULL)
-  {
-    if (default_gl_state == NULL)
-    {
-      default_gl_state = new_gl_state();
-    }
-    return default_gl_state;
-  }
-  return current_gl_state;
-}
-#define SET_CURRENT_STATE(_x) current_gl_state = _x
-#endif
 
 /* No support for threading */
 #else
@@ -649,7 +569,6 @@ static void log_gl(const char* format, ...)
 
 /**/
 
-#ifndef WIN32
 typedef struct
 {
   int attrib;
@@ -750,7 +669,6 @@ typedef struct
 
 static _glXFBConfig fbconfigs[N_MAX_CONFIGS];
 static int nbFBConfigs = 0;
-#endif
 
 
 
@@ -761,45 +679,6 @@ static int debug_array_ptr = 0;
 static int disable_optim = 0;
 static int limit_fps = 0;
 
-#ifndef WIN32
-static struct sigaction old_action;
-
-static void sigsegv_handler(int signum, siginfo_t* info, void* ptr)
-{
-  struct ucontext* context = (struct ucontext*)ptr;
-#if defined(__i386__)
-  unsigned char* eip_ptr = (unsigned char*)context->uc_mcontext.gregs[REG_EIP];
-#elif defined(__x86_64__)
-  unsigned char* eip_ptr = (unsigned char*)context->uc_mcontext.gregs[REG_RIP];
-#else
-  #error "unsupported architecture"
-#endif
-  if (eip_ptr[0] == 0xCD && eip_ptr[1] == 0x99)
-  {
-#if defined(__i386__)
-    context->uc_mcontext.gregs[REG_EIP] += 2;
-#elif defined(__x86_64__)
-    context->uc_mcontext.gregs[REG_RIP] += 2;
-#else
-  #error "unsupported architecture"
-#endif
-  }
-  else
-  {
-    log_gl("unhandled SIGSEGV\n");
-    exit(-1); // FIXME
-    if (old_action.sa_flags & SA_SIGINFO)
-    {
-      old_action.sa_sigaction(signum, info, ptr);
-    }
-    else
-    {
-      old_action.sa_handler(signum);
-    }
-  }
-}
-#endif
-
 #ifdef TCP_COMMUNICATION_SUPPORT
 
 #define PORT    5555
@@ -808,20 +687,12 @@ static void sigsegv_handler(int signum, siginfo_t* info, void* ptr)
 #include <sys/stat.h>
 #include <unistd.h>
 
-#ifndef WIN32
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 static int sock;
-#else
-#include <windows.h>
-#include <winbase.h>
-#include <winuser.h>
-#include <ws2tcpip.h>
-SOCKET sock;
-#endif
 
 
 static void
@@ -839,11 +710,6 @@ init_sockaddr (struct sockaddr_in *name,
   if (hostinfo == NULL)
   {
     log_gl("Unknown host %s.\n", hostname);
-#ifdef WIN32
-    char msg[512];
-    sprintf(msg, "Unknown host %s", hostname);
-    MessageBox(NULL, msg, "Unknown host", 0);
-#endif
     exit (EXIT_FAILURE);
   }
   name->sin_addr = *(struct in_addr *) hostinfo->h_addr;
@@ -858,13 +724,8 @@ static void write_sock_data(void* data, int len)
     //if (debug_gl) log_gl("to write : %d\n", len);
     while(offset < len)
     {
-#ifndef WIN32
       int nwritten = write(sock, data + offset, len - offset);
       if (nwritten == -1)
-#else
-      int nwritten = send(sock, data + offset, len - offset, 0);
-      if (nwritten == SOCKET_ERROR)
-#endif
       {
         if (errno == EINTR)
           continue;
@@ -897,13 +758,8 @@ static void read_sock_data(void* data, int len)
     int offset = 0;
     while(offset < len)
     {
-#ifndef WIN32
       int nread = read(sock, data + offset, len - offset);
       if (nread == -1)
-#else
-      int nread = recv(sock, data + offset, len - offset, 0);
-      if (nread == SOCKET_ERROR)
-#endif
       {
         if (errno == EINTR)
           continue;
@@ -1043,41 +899,6 @@ static int call_opengl_tcp(int func_number, int pid, void* ret_string, void* _ar
 }
 #endif
 
-#ifdef WIN32
-static EXCEPTION_DISPOSITION win32_sigsegv_handler(struct _EXCEPTION_RECORD *exception_record,
-                                     void * EstablisherFrame,
-                                     struct _CONTEXT *ContextRecord,
-                                     void * DispatcherContext)
-{
-  /* If the exception is an access violation */
-  if (exception_record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
-      exception_record->NumberParameters >= 2)
-  {
-    //int accessMode = (int)exception_record->ExceptionInformation[0];
-    //void* adr = (void *)exception_record->ExceptionInformation[1];
-
-    unsigned char* eip_ptr = (unsigned char*)ContextRecord->Eip;
-    if (eip_ptr[0] == 0xCD && eip_ptr[1] == 0x99)
-    {
-      ContextRecord->Eip += 2;
-      return ExceptionContinueExecution;
-    }
-    else
-    {
-      log_gl("not handled exception : %X\n", (int)exception_record->ExceptionCode);
-      fflush(get_err_file());
-      return ExceptionContinueSearch;
-    }
-  }
-  else
-  {
-    log_gl("not handled exception : %X\n", (int)exception_record->ExceptionCode);
-    fflush(get_err_file());
-    return ExceptionContinueSearch;
-  }
-}
-#endif
-
 static char *glbuffer;
 static int glfd;
 
@@ -1106,9 +927,6 @@ static int call_opengl_qemu(int func_number, int pid, void* ret_string, void* ar
 {
 #if defined(__i386__)
   int ret;
-#ifdef WIN32
-  __asm__ ("pushl %0;pushl %%fs:0;movl %%esp,%%fs:0;" : : "g" (win32_sigsegv_handler));
-#endif
   __asm__ ("push %ebx");
   __asm__ ("push %ecx");
   __asm__ ("push %edx");
@@ -1124,9 +942,6 @@ static int call_opengl_qemu(int func_number, int pid, void* ret_string, void* ar
   __asm__ ("pop %ecx");
   __asm__ ("pop %ebx");
   __asm__ ("mov %%eax, %0"::"m"(ret));
-#ifdef WIN32
-  __asm__ ("movl (%%esp),%%ecx;movl %%ecx,%%fs:0;addl $8,%%esp;" : : : "%ecx");
-#endif
   return ret;
 #elif defined(__x86_64__)
   int ret;
@@ -1194,9 +1009,6 @@ static int call_opengl_io(int func_number, int pid,
 #ifdef USE_REGS
 #if defined(__i386__)
   int ret;
-#ifdef WIN32
-  __asm__ ("pushl %0;pushl %%fs:0;movl %%esp,%%fs:0;" : : "g" (win32_sigsegv_handler));
-#endif
   __asm__ ("push %ebx");
   __asm__ ("push %ecx");
   __asm__ ("push %edx");
@@ -1215,9 +1027,6 @@ static int call_opengl_io(int func_number, int pid,
   __asm__ ("pop %ecx");
   __asm__ ("pop %ebx");
   __asm__ ("mov %%eax, %0"::"m"(ret));
-#ifdef WIN32
-  __asm__ ("movl (%%esp),%%ecx;movl %%ecx,%%fs:0;addl $8,%%esp;" : : : "%ecx");
-#endif
   return ret;
 #elif defined(__x86_64__)
   int ret;
@@ -1253,15 +1062,9 @@ static int call_opengl_io(int func_number, int pid,
   params[5] = -1;
 
 #if defined(__i386__) || defined(__x86_64__)
-#ifdef WIN32
-  __asm__ volatile ("pushl %0;pushl %%fs:0;movl %%esp,%%fs:0;" :: "g"(win32_sigsegv_handler));
-#endif
   __asm__ volatile ("mov  %0, %%eax" :: "m"(ptr) : "eax", "rax");
   __asm__ volatile ("mov  $0x270c, %%edx" ::: "edx", "rdx");
   __asm__ volatile ("outl %eax,(%dx)");
-#ifdef WIN32
-  __asm__ volatile ("movl (%%esp),%%ecx;movl %%ecx,%%fs:0;addl $8,%%esp;" ::: "%ecx");
-#endif
 #else
   fprintf(stderr, "unsupported architecture!\n");
 #endif
@@ -1471,32 +1274,12 @@ static void do_init()
   if (use_tcp_communication)
   {
     struct sockaddr_in servername;
-#ifdef WIN32
-    WORD wVersionRequested;
-    WSADATA WSAData;		/* Structure WSADATA d�finie dans winsock.h */
-    int err;
-
-    wVersionRequested = MAKEWORD(2, 0);	/* 1.1 Version voulut de Winsock */
-    err = WSAStartup(wVersionRequested, &WSAData);	/* Appel de notre fonction */
-    if (err != 0)
-    {
-      MessageBox(NULL, "WSAStartup failed", "WSAStartup failed", 0);
-      exit(EXIT_FAILURE);
-    }
-#endif
     /* Create the socket. */
     sock = socket (AF_INET, SOCK_STREAM,
-#ifndef WIN32
                    IPPROTO_TCP
-#else
-                   0
-#endif
                   );
     if (sock < 0)
     {
-#ifdef WIN32
-      MessageBox(NULL, "socket (client)", "socket (client)", 0);
-#endif
       perror ("socket (client)");
       exit (EXIT_FAILURE);
     }
@@ -1510,16 +1293,10 @@ static void do_init()
     int flag = 1;
     if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY,(char *)&flag, sizeof(int)) != 0)
     {
-#ifdef WIN32
-      MessageBox(NULL, "setsockopt TCP_NODELAY", "setsockopt TCP_NODELAY", 0);
-#endif
       perror("setsockopt TCP_NODELAY");
     }
     if (setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE,(char *)&flag, sizeof(int)) != 0)
     {
-#ifdef WIN32
-      MessageBox(NULL, "setsockopt SO_KEEPALIVE", "setsockopt SO_KEEPALIVE", 0);
-#endif
       perror("setsockopt SO_KEEPALIVE");
     }
 
@@ -1527,9 +1304,6 @@ static void do_init()
                     (struct sockaddr *) &servername,
                     sizeof (servername)))
     {
-#ifdef WIN32
-      MessageBox(NULL, "impossible to connect to server", "impossible to connect to server", 0);
-#endif
       perror ("impossible to connect to server");
       exit (EXIT_FAILURE);
     }
@@ -1540,7 +1314,6 @@ static void do_init()
   else
 #endif
   {
-#ifndef WIN32
 //  struct sigaction action;
 //  action.sa_sigaction = sigsegv_handler;
 //  sigemptyset(&(action.sa_mask));
@@ -1583,7 +1356,6 @@ static void do_init()
 //    log_gl("fork failed\n");
 //    exit(-1);
 //  }
-#endif
   }
 }
 
@@ -1625,30 +1397,10 @@ static int try_to_put_into_phys_memory(void* addr, int len)
 #define FLOAT_TO_ARG(x)              (long)*((int*)(&x))
 #define DOUBLE_TO_ARG(x)             (long)(&x)
 
-#ifdef WIN32
-static int getpagesize()
-{
-  return 4096;
-}
-
-static void mlock(void* ptr, int size)
-{
-}
-
-static void posix_memalign(void** pptr, int alignment, int size)
-{
-  *pptr = malloc(size);
-}
-
-#endif
-
 static int disable_warning_for_gl_read_pixels = 0;
 
-#ifndef WIN32
 static Bool glXMakeCurrent_no_lock( Display *dpy, GLXDrawable drawable, GLXContext ctx);
 static void glXSwapBuffers_no_lock( Display *dpy, GLXDrawable drawable );
-#endif
-
 static void glGetIntegerv_no_lock( GLenum pname, GLint *params );
 static void glPixelStorei_no_lock( GLenum pname, GLint param );
 static void glBindBufferARB_no_lock (GLenum target, GLuint buffer);
@@ -1656,10 +1408,6 @@ static void glReadPixels_no_lock  ( GLint x, GLint y,
                                     GLsizei width, GLsizei height,
                                     GLenum format, GLenum type,
                                     GLvoid *pixels );
-
-#ifdef WIN32
-typedef void* __GLXextFuncPtr;
-#endif
 
 static __GLXextFuncPtr glXGetProcAddress_no_lock(const GLubyte * name);
 
@@ -1809,15 +1557,10 @@ static void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, i
   {
     last_current_thread = current_thread;
     if (debug_gl) log_gl("gl thread switch\n");
-#ifndef WIN32
     glXMakeCurrent_no_lock(state->display, state->current_drawable, state->context);
-#else
-    // FIXME
-#endif
    }
 #endif
 
-#ifndef WIN32
   if (func_number == glFlush_func && getenv("HACK_XGL"))
   {
     glXSwapBuffers_no_lock(state->display, state->current_drawable);
@@ -1827,7 +1570,6 @@ static void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, i
   {
     goto end_do_opengl_call;
   }
-#endif
 
   if ((func_number >= glRasterPos2d_func && func_number <= glRasterPos4sv_func) ||
       (func_number >= glWindowPos2d_func && func_number <= glWindowPos3sv_func) ||
@@ -2040,12 +1782,10 @@ static void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, i
       try_to_put_into_phys_memory(ret_string, RET_STRING_SIZE);
     }
 
-#ifndef WIN32
       if (getenv("GET_IMG_FROM_SERVER") != NULL && func_number == glXSwapBuffers_func)
-      {
+      { // FIXMEIM ???
       }
       else
-#endif
         ret_int = call_opengl(func_number, getpid(), (signature->ret_type == TYPE_CONST_CHAR) ? ret_string : NULL, args, args_size);
     if (func_number == glXCreateContext_func)
     {
@@ -2054,7 +1794,6 @@ static void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, i
     }
     else if (func_number == glXSwapBuffers_func || func_number == glFinish_func || func_number == glFlush_func)
     {
-#ifndef WIN32
       if (getenv("GET_IMG_FROM_SERVER"))
       {
         XWindowAttributes window_attributes_return;
@@ -2099,7 +1838,6 @@ static void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, i
         XDestroyImage(img);
       }
       else
-#endif
         call_opengl(_synchronize_func, getpid(), NULL, NULL, NULL);
     }
 
@@ -3857,7 +3595,6 @@ static void removeUnwantedExtensions(char* ret)
   free(toBeRemoved);
 }
 
-#ifndef WIN32
 const char *glXQueryExtensionsString( Display *dpy, int screen )
 {
   LOCK(glXQueryExtensionsString_func);
@@ -5221,8 +4958,6 @@ GLAPI int APIENTRY EXT_FUNC(glXSwapIntervalSGI) ( int interval )
   //log_gl("glXSwapIntervalSGI(%d) = %d\n", interval, ret);
   return ret;
 }
-
-#endif
 
 GLAPI const GLubyte * APIENTRY glGetString( GLenum name )
 {
@@ -11730,7 +11465,6 @@ static const char* global_glXGetProcAddress_request =
 "glWindowPos4sMESA\0"
 "glWindowPos4svMESA\0"
 "glWriteMaskEXT\0"
-#ifndef WIN32
 "glXAllocateMemoryMESA\0"
 "glXAllocateMemoryNV\0"
 "glXBindChannelToWindowSGIX\0"
@@ -11850,7 +11584,6 @@ static const char* global_glXGetProcAddress_request =
 "glXWaitGL\0"
 "glXWaitVideoSyncSGI\0"
 "glXWaitX\0"
-#endif
 "\0"
 };
 
@@ -11888,33 +11621,16 @@ static __GLXextFuncPtr glXGetProcAddress_no_lock(const GLubyte * _name)
     goto end_of_glx_get_proc_address;
   }
 
-#ifdef WIN32
-  if (strcmp(name, "wglGetExtensionsStringARB") == 0 ||
-      strcmp(name, "wglGetExtensionsStringEXT") == 0)
-  {
-    ret = wglGetExtensionsStringARB;
-    goto end_of_glx_get_proc_address;
-  }
-#endif
-
   if (tabSize == 0)
   {
     tabSize = 2000;
     tab_assoc = calloc(tabSize, sizeof(AssocProcAdress));
 
-#ifndef WIN32
     handle = dlopen(getenv("REAL_LIBGL") ? getenv("REAL_LIBGL") : "libGL.so.1.2" ,RTLD_LAZY);
     if (!handle) {
       log_gl("%s\n", dlerror());
       exit(1);
     }
-#else
-    handle = (void *)LoadLibrary("opengl32.dll");
-    if (!handle) {
-      log_gl("can't load opengl32.dll\n");
-      exit(1);
-    }
-#endif
 
     {
       log_gl("global_glXGetProcAddress request\n");
@@ -11944,11 +11660,7 @@ static __GLXextFuncPtr glXGetProcAddress_no_lock(const GLubyte * _name)
       for(i=0; i<nbRequestElts;i++)
       {
         const char* funcName = global_glXGetProcAddress_request + offset;
-#ifndef WIN32
         void* func = dlsym(handle, funcName);
-#else
-        void* func = GetProcAddress(handle, funcName);
-#endif
 #ifdef PROVIDE_STUB_IMPLEMENTATION
         if (func == NULL)
           func = _glStubImplementation;
@@ -12021,11 +11733,7 @@ static __GLXextFuncPtr glXGetProcAddress_no_lock(const GLubyte * _name)
   int ret_call = 0;
   long args[] = { INT_TO_ARG(name) };
   do_opengl_call_no_lock(glXGetProcAddress_fake_func, &ret_call, args, NULL);
-#ifndef WIN32
   void* func = dlsym(handle, name);
-#else
-  void* func = GetProcAddress(handle, name);
-#endif
 #ifdef PROVIDE_STUB_IMPLEMENTATION
   if (func == NULL)
     func = _glStubImplementation;
@@ -12090,255 +11798,3 @@ __GLXextFuncPtr glXGetProcAddressARB (const GLubyte * name)
   return glXGetProcAddress(name);
 }
 
-#ifdef WIN32
-
-WINGDIAPI PROC WINAPI wglGetProcAddress(LPCSTR _name)
-{
-  return glXGetProcAddress(_name);
-}
-
-WINGDIAPI PROC WINAPI wglGetDefaultProcAddress(LPCSTR _name)
-{
-  return glXGetProcAddress(_name);
-}
-
-WINGDIAPI int WINAPI wglChoosePixelFormat(HDC hdc,CONST PIXELFORMATDESCRIPTOR* b)
-{
-  log_gl("wglChoosePixelFormat : stub\n");
-  return 1; /* FIXME ? */
-}
-
-WINGDIAPI BOOL  WINAPI wglCopyContext           (HGLRC a, HGLRC ctxt, UINT c)
-{
-  log_gl("wglCopyContext : stub\n");
-  return 0;
-}
-
-/*
-static void __attribute__ ((constructor)) gl_init (void)
-{
-  MessageBox(NULL, "gl_init", "gl_init", 0);
-}*/
-
-WINGDIAPI HGLRC WINAPI wglCreateContext         (HDC hdc)
-{
-  HGLRC ret;
-  long args[] = { POINTER_TO_ARG(/*dpy*/0), INT_TO_ARG(/*visualid*/0), INT_TO_ARG(/*shareList*/0), INT_TO_ARG(/*direct*/1) };
-  do_opengl_call(glXCreateContext_func, &ret, args, NULL);
-  /*MessageBox(NULL, "wglCreateContext", "wglCreateContext", 0);*/
-  return ret;
-}
-
-WINGDIAPI HGLRC WINAPI wglCreateLayerContext    (HDC hdc, int b)
-{
-  log_gl("wglCreateLayerContext : stub\n");
-  return 0;
-}
-
-WINGDIAPI BOOL  WINAPI wglDeleteContext         (HGLRC a)
-{
-  long args[] = { POINTER_TO_ARG(/*dpy*/0), POINTER_TO_ARG(a) };
-  do_opengl_call(glXDestroyContext_func, NULL, args, NULL);
-
-  /* FIXME ! */
-//  call_opengl(_exit_process_func, getpid(), NULL, NULL, NULL);
-
-  return 1;
-}
-
-WINGDIAPI BOOL  WINAPI wglDescribeLayerPlane    (HDC hdc, int b, int c, UINT d, LPLAYERPLANEDESCRIPTOR e)
-{
-  log_gl("wglDescribeLayerPlane : stub\n");
-  return 0;
-}
-
-WINGDIAPI int   WINAPI wglDescribePixelFormat   (HDC hdc, int b, UINT c, LPPIXELFORMATDESCRIPTOR d)
-{
-  log_gl("wglDescribePixelFormat : stub\n");
-  return 0;
-}
-
-WINGDIAPI HGLRC WINAPI wglGetCurrentContext     (void)
-{
-  log_gl("wglGetCurrentContext : stub\n");
-  return 0;
-}
-WINGDIAPI HDC   WINAPI wglGetCurrentDC          (void)
-{
-  log_gl("wglGetCurrentDC : stub\n");
-  return 0;
-}
-
-WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC hdc, int b, int c, int d, COLORREF *e)
-{
-  log_gl("wglGetLayerPaletteEntries : stub\n");
-  return 0;
-}
-
-WINGDIAPI int   WINAPI wglGetPixelFormat        (HDC hdc)
-{
-  log_gl("wglGetPixelFormat : stub\n");
-  return 0;
-}
-
-#define IsViewable         2
-
-static RECT oldRect = {0, 0, 0, 0};
-
-static void _move_win_if_necessary(HDC hdc)
-{
-  HWND hwnd = WindowFromDC(hdc);
-  if (hwnd)
-  {
-    RECT rect;
-    if (GetWindowRect(hwnd, &rect) == 0)
-    {
-      log_gl("arg. cannot retrieve window size\n");
-      return;
-    }
-    if (oldRect.left != rect.left || oldRect.top != rect.top ||
-        oldRect.right != rect.right || oldRect.bottom != rect.bottom)
-    {
-      {
-        long args[] = { INT_TO_ARG(hdc), INT_TO_ARG(IsViewable) }; /* FIXME */
-        do_opengl_call(_changeWindowState_func, NULL, args, NULL);
-      }
-      {
-        int standardizedPos[] = { rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top };
-        long args[] = { INT_TO_ARG(hdc), POINTER_TO_ARG(standardizedPos)};
-        do_opengl_call(_moveResizeWindow_func, NULL, args, NULL);
-      }
-
-      memcpy(&oldRect, &rect, sizeof(rect));
-    }
-  }
-  else
-  {
-    log_gl("arg. cannot retrieve window from DC\n");
-  }
-}
-
-WINGDIAPI BOOL  WINAPI wglMakeCurrent(HDC hdc, HGLRC ctxt)
-{
-  long args[] = { POINTER_TO_ARG(/*dpy*/0), INT_TO_ARG(/*drawable*/hdc), INT_TO_ARG(/*ctx*/ctxt) };
-  do_opengl_call(glXMakeCurrent_func, NULL, args, NULL);
-  if (hdc != NULL)
-    _move_win_if_necessary(hdc);
-  return 1;
-}
-
-WINGDIAPI BOOL  WINAPI wglRealizeLayerPalette   (HDC hdc, int b, BOOL c)
-{
-  log_gl("wglRealizeLayerPalette : stub\n");
-  return 0;
-}
-
-WINGDIAPI int   WINAPI wglSetLayerPaletteEntries(HDC hdc, int b, int c, int d, CONST COLORREF *e)
-{
-  log_gl("wglSetLayerPaletteEntries : stub\n");
-  return 0;
-}
-
-WINGDIAPI BOOL  WINAPI wglSetPixelFormat        (HDC hdc, int b, CONST PIXELFORMATDESCRIPTOR *c)
-{
-  log_gl("wglSetPixelFormat : stub\n");
-  return 1; /* FIXME ? */
-}
-
-WINGDIAPI BOOL  WINAPI wglShareLists            (HGLRC a, HGLRC ctxt)
-{
-  log_gl("wglShareLists : stub\n");
-  return 0;
-}
-
-WINGDIAPI BOOL  WINAPI wglSwapBuffers           (HDC hdc)
-{
-  _move_win_if_necessary(hdc);
-  long args[] = { POINTER_TO_ARG(/*dpy*/0), INT_TO_ARG(/*drawable*/hdc) };
-  do_opengl_call(glXSwapBuffers_func, NULL, args, NULL);
-  return 1;
-}
-
-WINGDIAPI BOOL  WINAPI wglSwapLayerBuffers      (HDC hdc, UINT b)
-{
-  log_gl("wglSwapLayerBuffers : stub\n");
-  return 0;
-}
-
-WINGDIAPI BOOL  WINAPI wglUseFontBitmapsA       (HDC hdc, DWORD b, DWORD c, DWORD d)
-{
-  log_gl("wglUseFontBitmapsA : stub\n");
-  return 0;
-}
-
-WINGDIAPI BOOL  WINAPI wglUseFontBitmapsW       (HDC hdc, DWORD b, DWORD c, DWORD d)
-{
-  log_gl("wglUseFontBitmapsW : stub\n");
-  return 0;
-}
-
-WINGDIAPI BOOL  WINAPI wglUseFontOutlinesA      (HDC hdc, DWORD b, DWORD c, DWORD d, FLOAT e, FLOAT f, int g, LPGLYPHMETRICSFLOAT h)
-{
-  log_gl("wglUseFontOutlinesA : stub\n");
-  return 0;
-}
-
-WINGDIAPI BOOL  WINAPI wglUseFontOutlinesW      (HDC hdc, DWORD b, DWORD c, DWORD d, FLOAT e, FLOAT f, int g, LPGLYPHMETRICSFLOAT h)
-{
-  log_gl("wglUseFontOutlinesW : stub\n");
-  return 0;
-}
-
-#define GLX_EXTENSIONS 		3
-
-WINGDIAPI const char* WINAPI wglGetExtensionsStringARB(HDC hdc)
-{
-  int i;
-  char* glxClientExtensions = NULL;
-  char* glxServerExtensions = NULL;
-  char* glExtensions = NULL;
-  static char* extensions = NULL;
-  if (extensions)
-    return extensions;
-
-  {
-    long args[] = { POINTER_TO_ARG(/*dpy*/0), INT_TO_ARG(GLX_EXTENSIONS) };
-    do_opengl_call(glXGetClientString_func, &glxClientExtensions, args, NULL);
-    glxClientExtensions = strdup(glxClientExtensions);
-  }
-  {
-    long args[] = { POINTER_TO_ARG(/*dpy*/0), INT_TO_ARG(/*screen*/0), INT_TO_ARG(GLX_EXTENSIONS) };
-    do_opengl_call(glXQueryServerString_func, &glxServerExtensions, args, NULL);
-    glxServerExtensions = strdup(glxServerExtensions);
-  }
-  glExtensions = glGetString(GL_EXTENSIONS);
-
-  extensions = malloc(strlen("WGL_ARB_extensions_string") + 1 +
-                             strlen(glxClientExtensions) + 1 +
-                             strlen(glxServerExtensions) + 1 +
-                             strlen(glExtensions) + 1);
-  strcpy(extensions, "WGL_ARB_extensions_string ");
-  strcat(extensions, glxClientExtensions);
-  strcat(extensions, " ");
-  strcat(extensions, glxServerExtensions);
-  strcat(extensions, " ");
-  strcat(extensions, glExtensions);
-
-  free(glxClientExtensions);
-  free(glxServerExtensions);
-
-  i = 0;
-  while(extensions[i])
-  {
-    if (strncmp(extensions + i, "GLX", 3) == 0)
-    {
-      extensions[i] = 'W';
-      extensions[i+1] = 'G';
-      extensions[i+2] = 'L';
-    }
-    i++;
-  }
-
-  return extensions;
-}
-#endif
