@@ -73,9 +73,9 @@ typedef struct
   int nb_elts;
 } Token;
 
-int compare_func(Token* a, Token* b)
+int compare_func(const void* a, const void* b)
 {
-  return a->value - b->value;
+  return ((Token *)a)->value - ((Token *)b)->value;
 }
 
 typedef struct
