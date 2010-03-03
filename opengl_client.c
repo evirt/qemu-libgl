@@ -69,12 +69,6 @@
 
 #define ENABLE_THREAD_SAFETY
 
-#define IO_VIRTIO_SUPPORT
-static int use_io_virtio = 1;
-
-/*void *pthread_getspecific(pthread_key_t key);
-       int pthread_setspecific(pthread_key_t key, const void *value);*/
-
 #define CHECK_ARGS(x, y) (1 / ((sizeof(x)/sizeof(x[0])) == (sizeof(y)/sizeof(y[0])) ? 1 : 0)) ? x : x, y
 
 //#define PROVIDE_STUB_IMPLEMENTATION
@@ -675,11 +669,11 @@ static int limit_fps = 0;
 static char *glbuffer;
 static int glfd;
 
-static inline int call_opengl_virtio(int func_number, void* ret_string, void* args, void* args_size)
+static inline int call_opengl(int func_number, void* ret_string, void* args, void* args_size)
 {
 	volatile int *i = (volatile int*)glbuffer;
 	i[0] = func_number;
-	// pid is filled in by the kernel module for virtio
+	/* i[1] = pid; ...is filled in by the kernel module for virtio GL */
 	i[2] = (int)ret_string;
 	i[3] = (int)args;
 	i[4] = (int)args_size;
@@ -688,19 +682,19 @@ static inline int call_opengl_virtio(int func_number, void* ret_string, void* ar
 	fsync(glfd); // Make magic happen
 
 	if(i[6] == 0xdeadbeef) {
+		/* Kernel decided to kill the process */
 		fprintf(stderr, "Call failed: func %d   ret: %d\n", func_number, i[0]);
-		*(int*)0 = 0; // Segfault
-		exit(1);
+		*(int*)0 = 0;
+		exit(1); /* Just in case */
 	}
 	
 	return i[0];
 }
 
-static void opengl_virtio_init(void)
+static void do_init(void)
 {
-	fprintf(stderr, "opengl_virtio_init()\n");
-
 	glfd = open("/dev/vimem", O_RDWR | O_NOCTTY | O_SYNC | O_CLOEXEC);
+
 	if(glfd == -1) {
 		fprintf(stderr, "Failed to open device\n");
 		exit(1);
@@ -712,67 +706,6 @@ static void opengl_virtio_init(void)
 		fprintf(stderr, "Failed to map buffer - dying horribly\n");
 		exit(1);
 	}
-}
-
-static int call_opengl(int func_number, int pid, void* ret_string, void* args, void* args_size)
-{
-#ifdef IO_VIRTIO_SUPPORT
-  if(use_io_virtio)
-    return call_opengl_virtio(func_number, ret_string, args, args_size);
-#endif
-  return 0;
-}
-
-static void do_init()
-{
-#ifdef IO_VIRTIO_SUPPORT
-  if (use_io_virtio)
-    opengl_virtio_init();
-#endif
-  {
-//  struct sigaction action;
-//  action.sa_sigaction = sigsegv_handler;
-//  sigemptyset(&(action.sa_mask));
-//  action.sa_flags = SA_SIGINFO;
-//  sigaction(SIGSEGV, &action, &old_action);
-
-//  int parent_pid = getpid();
-//  int pid_fork = fork();
-//  if (pid_fork == 0)
-//  {
-    /* Sorry. This is really ugly, not portable, etc...
-        This is the quickest way I've found
-        to make sure that someone notices that the main program has stopped
-        running and can warn the server */
-//    if (fork() != 0) exit(0);
-//    setsid();
-//    if (fork() != 0) exit(0);
-//    fcloseall();
-//    chdir("/");
-
-//    char processname[512];
-//    sprintf(processname, "/proc/%d", parent_pid);
-//    while(1)
-//    {
-//      struct stat buf;
-//      if (lstat(processname, &buf) < 0)
-//      {
-//        call_opengl(_exit_process_func, parent_pid, NULL, NULL, NULL);
-//        exit(0);
-//      }
-//      sleep(1);
-//    }
-//  }
-//  else if (pid_fork > 0)
-//  {
-//    log_gl("go on...\n");
-//  }
-//  else
-//  {
-//    log_gl("fork failed\n");
-//    exit(-1);
-//  }
-  }
 }
 
 static int try_to_put_into_phys_memory(void* addr, int len)
@@ -914,7 +847,7 @@ static void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, i
     int init_ret = 0;
     long temp_args[] = { getenv("WRITE_GL") != NULL, POINTER_TO_ARG(&init_ret) };
     int temps_args_size[] = { 0, sizeof(int) };
-    call_opengl(_init_func, getpid(), NULL, temp_args, temps_args_size);
+    call_opengl(_init_func, NULL, temp_args, temps_args_size);
     if (init_ret == 0)
     {
       log_gl("You maybe forgot to launch QEMU with -enable-gl argument.\n");
@@ -1081,7 +1014,7 @@ static void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, i
       if (debug_gl)
         log_gl("flush pending opengl calls...\n");
       try_to_put_into_phys_memory(command_buffer, command_buffer_size);
-      call_opengl(_serialized_calls_func, getpid(), NULL, &command_buffer, &command_buffer_size);
+      call_opengl(_serialized_calls_func, NULL, &command_buffer, &command_buffer_size);
       command_buffer_size = 0;
       last_command_buffer_size = -1;
     }
@@ -1158,7 +1091,7 @@ static void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, i
     {
       if (debug_gl)
         log_gl("too large opengl call.\n");
-      call_opengl(func_number, getpid(), NULL, args, args_size);
+      call_opengl(func_number, NULL, args, args_size);
     }
   }
   else
@@ -1168,7 +1101,7 @@ static void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, i
       if (debug_gl)
         log_gl("flush pending opengl calls...\n");
       try_to_put_into_phys_memory(command_buffer, command_buffer_size);
-      call_opengl(_serialized_calls_func, getpid(), NULL, &command_buffer, &command_buffer_size);
+      call_opengl(_serialized_calls_func, NULL, &command_buffer, &command_buffer_size);
       command_buffer_size = 0;
       last_command_buffer_size = -1;
     }
@@ -1184,7 +1117,7 @@ static void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, i
       { // FIXMEIM ???
       }
       else
-        ret_int = call_opengl(func_number, getpid(), (signature->ret_type == TYPE_CONST_CHAR) ? ret_string : NULL, args, args_size);
+        ret_int = call_opengl(func_number, (signature->ret_type == TYPE_CONST_CHAR) ? ret_string : NULL, args, args_size);
     if (func_number == glXCreateContext_func)
     {
       if (debug_gl)
@@ -1236,7 +1169,7 @@ static void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, i
         XDestroyImage(img);
       }
       else
-        call_opengl(_synchronize_func, getpid(), NULL, NULL, NULL);
+        call_opengl(_synchronize_func, NULL, NULL, NULL);
     }
 
     if (signature->ret_type == TYPE_UNSIGNED_INT ||
