@@ -720,6 +720,7 @@ static int call_opengl(int func_number, int pid, void* ret_string, void* args, v
   if(use_io_virtio)
     return call_opengl_virtio(func_number, ret_string, args, args_size);
 #endif
+  return 0;
 }
 
 static void do_init()
@@ -933,7 +934,7 @@ static void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, i
     }
     else
     {
-      exists_on_server_side[func_number] = glXGetProcAddress_no_lock(tab_opengl_calls_name[func_number]) != NULL;
+      exists_on_server_side[func_number] = glXGetProcAddress_no_lock((const GLubyte *)tab_opengl_calls_name[func_number]) != NULL;
     }
     if (exists_on_server_side[func_number] == 0)
     {
@@ -4379,7 +4380,7 @@ GLAPI const GLubyte * APIENTRY glGetString( GLenum name )
   {
     if (i <= 4 && getenv(glGetStringsName[i]))
     {
-      glStrings[i] = getenv(glGetStringsName[i]);
+      glStrings[i] = (GLubyte*)getenv(glGetStringsName[i]);
     }
     else
     {
@@ -4388,10 +4389,10 @@ GLAPI const GLubyte * APIENTRY glGetString( GLenum name )
     }
 
     log_gl("glGetString(0x%X) = %s\n", name, glStrings[i]);
-    glStrings[name - GL_VENDOR] = strdup(glStrings[i]);
+    glStrings[name - GL_VENDOR] = (GLubyte*)strdup((char *)glStrings[i]);
     if (name == GL_EXTENSIONS)
     {
-      removeUnwantedExtensions(glStrings[i]);
+      removeUnwantedExtensions((char *)glStrings[i]);
     }
   }
   UNLOCK(glGetString_func);
@@ -8583,7 +8584,8 @@ static void _gl_get_uniform(PFNGLGETPROGRAMIVPROC getProgramiv,
   /*log_gl("nActiveUniforms=%d\n", nActiveUniforms);*/
   for(i=0;i<nActiveUniforms;i++)
   {
-    int actualLength, size, type;
+    int actualLength, size;
+    unsigned int type;
     int index = (i == 0 && location < nActiveUniforms) ? location : (i == location) ? 0 : i;
     getActiveUniform(program, index, nameMaxLength, &actualLength, &size, &type, name);
     /*log_gl("[%d] %s\n", i, name);*/
