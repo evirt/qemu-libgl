@@ -1,0 +1,2 @@
+void removeUnwantedExtensions(char* ret);
+
