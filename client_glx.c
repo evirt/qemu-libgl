@@ -3330,7 +3330,7 @@ __GLXextFuncPtr glXGetProcAddress_no_lock(const GLubyte * _name)
   __GLXextFuncPtr ret = NULL;
 
   const char* name = (const char*)_name;
-  log_gl("looking for \"%s\",\n", name);
+  if(debug_gl) log_gl("looking for \"%s\",\n", name);
   int i;
 
   if (name == NULL)
@@ -3350,7 +3350,7 @@ __GLXextFuncPtr glXGetProcAddress_no_lock(const GLubyte * _name)
     }
 
     {
-      log_gl("global_glXGetProcAddress request\n");
+      if(debug_gl) log_gl("global_glXGetProcAddress request\n");
       int sizeOfString = 0;
       int nbRequestElts = 0;
       int i = 0;
@@ -3367,7 +3367,7 @@ __GLXextFuncPtr glXGetProcAddress_no_lock(const GLubyte * _name)
         }
         i++;
       }
-      log_gl("nbRequestElts=%d\n", nbRequestElts);
+      if(debug_gl) log_gl("nbRequestElts=%d\n", nbRequestElts);
       char* result = (char*)malloc(nbRequestElts);
 
       long args[] = { INT_TO_ARG(nbRequestElts), POINTER_TO_ARG(global_glXGetProcAddress_request), POINTER_TO_ARG(result) };
@@ -3382,7 +3382,7 @@ __GLXextFuncPtr glXGetProcAddress_no_lock(const GLubyte * _name)
         if (func == NULL)
           func = _glStubImplementation;
 #endif
-        if (result[i] && func == NULL)
+        if (result[i] && func == NULL && debug_gl)
           log_gl("%s %d %d\n", funcName, result[i], func != NULL);
         if (result[i] == 0)
         {
@@ -3446,7 +3446,7 @@ __GLXextFuncPtr glXGetProcAddress_no_lock(const GLubyte * _name)
       goto end_of_glx_get_proc_address;
     }
   }
-  log_gl("looking for \"%s\",\n", name);
+  if(debug_gl) log_gl("looking for \"%s\",\n", name);
   int ret_call = 0;
   long args[] = { INT_TO_ARG(name) };
   do_opengl_call_no_lock(glXGetProcAddress_fake_func, &ret_call, args, NULL);

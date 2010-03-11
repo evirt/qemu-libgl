@@ -714,7 +714,7 @@ void CONCAT(funcName,_no_lock)( GLenum pname, cType *params ) \
       { \
         long args[] = { INT_TO_ARG(pname), POINTER_TO_ARG(state->currentRasterPos) }; \
         int args_size[] = { 0, 4 * sizeof(float) }; \
-        log_gl("getting value 0x%X\n", pname); \
+        if(debug_gl) log_gl("getting value 0x%X\n", pname); \
         do_opengl_call_no_lock(glGetFloatv_func, NULL, CHECK_ARGS(args, args_size)); \
         state->currentRasterPosKnown = 1; \
       } \
@@ -726,7 +726,7 @@ void CONCAT(funcName,_no_lock)( GLenum pname, cType *params ) \
       long args[] = { INT_TO_ARG(pname), POINTER_TO_ARG(params) }; \
       int args_size[] = { 0, 0 }; \
       args_size[1] = tab_args_type_length[typeBase] * get_size_get_boolean_integer_float_double_v(funcNumber, pname); \
-      log_gl("getting value 0x%X\n", pname); \
+      if(debug_gl) log_gl("getting value 0x%X\n", pname); \
       do_opengl_call_no_lock(funcNumber, NULL, CHECK_ARGS(args, args_size)); \
       if (typeBase == TYPE_INT) log_gl("val=%d\n", (int)*params); \
       else if (typeBase == TYPE_FLOAT) log_gl("val=%f\n", (float)*params); \
@@ -1753,7 +1753,7 @@ GLAPI const GLubyte * APIENTRY glGetString( GLenum name )
       do_opengl_call_no_lock(glGetString_func, &glStrings[i], args, NULL);
     }
 
-    log_gl("glGetString(0x%X) = %s\n", name, glStrings[i]);
+    if(debug_gl) log_gl("glGetString(0x%X) = %s\n", name, glStrings[i]);
     glStrings[name - GL_VENDOR] = (GLubyte*)strdup((char *)glStrings[i]);
     if (name == GL_EXTENSIONS)
     {

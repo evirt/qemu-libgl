@@ -121,7 +121,7 @@ static inline int call_opengl(int func_number, void* ret_string, void* args, voi
 
 	if(i[6] == 0xdeadbeef) {
 		/* Kernel decided to kill the process */
-		fprintf(stderr, "Call failed: func %d   ret: %d\n", func_number, i[0]);
+		fprintf(stderr, "Call failed: func %d (%s)   ret: %d\n", func_number, tab_opengl_calls_name[func_number], i[0]);
 		*(int*)0 = 0;
 		exit(1); /* Just in case */
 	}
@@ -292,6 +292,7 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
 #ifdef ENABLE_THREAD_SAFETY
   if (last_current_thread != current_thread)
   {
+    fprintf(stderr, "MULTI-THREADED!----------------------\n");
     last_current_thread = current_thread;
     if (debug_gl) log_gl("gl thread switch\n");
     glXMakeCurrent_no_lock(state->display, state->current_drawable, state->context);
