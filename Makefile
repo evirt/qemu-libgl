@@ -6,13 +6,13 @@ all: libGL.so.1.2
 client_gl.o: client_gl.c client_gl.h
 	$(CC) -fPIC $(GL_CFLAGS) -c client_gl.c -o client_gl.o -I.
 
-client_glx.o: client_gl.c client_gl.h
+client_glx.o: client_glx.c client_gl.h opengl_client_xfonts.c
 	$(CC) -fPIC $(GL_CFLAGS) -c client_glx.c -o client_glx.o -I.
 
 .c.o:
 	$(CC) -fPIC $(GL_CFLAGS) -c $< -o $@
 
-libGL.so.1.2: client_stub.c opengl_client.c glgetv_cst.h opengl_func.h opengl_utils.h opengl_client_xfonts.c mesa_gl.h mesa_glext.h mesa_glx.h mesa_glxext.h client_gl.o log.o opengl_utils.o gl_tables.o client_glx.o
+libGL.so.1.2: client_stub.c opengl_client.c glgetv_cst.h opengl_func.h opengl_utils.h mesa_gl.h mesa_glext.h mesa_glx.h mesa_glxext.h client_gl.o log.o opengl_utils.o gl_tables.o client_glx.o
 	rm -f server_stub.c
 	$(CC) -fPIC $(GL_CFLAGS) opengl_client.c -shared -o libGL.so -lX11 -lXfixes -lm -L$(D)/usr/X11R6/lib -lpthread -I. client_gl.o log.o opengl_utils.o gl_tables.o client_glx.o
 
