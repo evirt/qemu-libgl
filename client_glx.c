@@ -20,8 +20,6 @@
 #include "common.h"
 #include "lock.h"
 #include "call.h"
-
-#include "remove_ext.h"
 #include "log.h"
 
 

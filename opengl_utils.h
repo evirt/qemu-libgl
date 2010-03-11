@@ -43,5 +43,6 @@ extern void delete_range(RangeAllocator* range, int n, const unsigned int* value
 extern void delete_consecutive_values(RangeAllocator* range, unsigned int first, int n);
 extern unsigned int calc_checksum(const void* _ptr, int length, unsigned int seed);
 extern void display_gl_call(FILE* f, int func_number, long* args, int* args_size);
+extern void removeUnwantedExtensions(char* ret);
 
 #endif

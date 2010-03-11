@@ -25,7 +25,6 @@
 
 #include "glgetv_cst.h"
 
-#include "remove_ext.h"
 #include "log.h"
 
 GLAPI void APIENTRY glPushAttrib(GLbitfield mask)
