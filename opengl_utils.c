@@ -676,7 +676,7 @@ void removeUnwantedExtensions(char* ret)
   free(toBeRemoved);
 }
 
-static int compute_arg_length(FILE* err_file, int func_number, int arg_i, long* args)
+int compute_arg_length(FILE* err_file, int func_number, int arg_i, long* args)
 {
   Signature* signature = (Signature*)tab_opengl_calls[func_number];
   int* args_type = signature->args_type;
