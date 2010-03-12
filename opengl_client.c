@@ -38,23 +38,11 @@
 #define _XOPEN_SOURCE 600
 #include <stdlib.h>
 #include <stdio.h>
-#include <stdarg.h>
-#include <signal.h>
 #include <string.h>
 #include <unistd.h>
-#include <errno.h>
 #include <assert.h>
-#include <math.h>
-#include <termios.h>
-#include <sys/io.h>
 
-#include <dlfcn.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
 #include <sys/mman.h>
-#include <pthread.h>
 #include <fcntl.h>
 
 #include "opengl_func.h"

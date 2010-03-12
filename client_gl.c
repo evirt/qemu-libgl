@@ -1,20 +1,7 @@
 #include <stdlib.h>
-#include <stdio.h>
-#include <stdarg.h>
-#include <signal.h>
 #include <string.h>
-#include <unistd.h>
-#include <errno.h>
 #include <assert.h>
 #include <math.h>
-#include <termios.h>
-#include <sys/io.h>
-
-#include <X11/X.h>
-#include <X11/Xutil.h>
-#include <X11/extensions/Xfixes.h>
-
-//#include <mesa_glx.h>
 
 #include "opengl_func.h"
 #include "common.h"
