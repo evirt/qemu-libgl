@@ -527,7 +527,7 @@ GLAPI void APIENTRY glPixelStoref(GLenum pname, GLfloat param)
   }
 }
 
-static void glPixelStorei_no_lock(GLenum pname, GLint param)
+void glPixelStorei_no_lock(GLenum pname, GLint param)
 {
   _glPixelStore(pname, param);
   if (!(pname == GL_PACK_SKIP_PIXELS || pname == GL_PACK_SKIP_ROWS || pname == GL_PACK_SKIP_IMAGES ||
@@ -1354,7 +1354,7 @@ GLAPI void APIENTRY glTranslatef(GLfloat x, GLfloat y, GLfloat z)
 #endif
 /* End of matrix optimization */
 
-static void glBindBufferARB_no_lock(GLenum target, GLuint buffer)
+void glBindBufferARB_no_lock(GLenum target, GLuint buffer)
 {
   CHECK_PROC(glBindBufferARB);
   GET_CURRENT_STATE();
@@ -3054,7 +3054,7 @@ GLAPI void APIENTRY glGetTexImage( GLenum target,
 }
 
 
-static void glReadPixels_no_lock(GLint x,
+void glReadPixels_no_lock(GLint x,
                   GLint y,
                   GLsizei width,
                   GLsizei height,

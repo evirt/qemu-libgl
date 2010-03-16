@@ -579,7 +579,7 @@ static void _move_win_if_necessary(Display *dpy, Window win)
   }
 }
 
-static Bool glXMakeCurrent_no_lock( Display *dpy, GLXDrawable drawable, GLXContext ctx)
+Bool glXMakeCurrent_no_lock( Display *dpy, GLXDrawable drawable, GLXContext ctx)
 {
   Bool ret = False;
   int i;
@@ -893,7 +893,7 @@ static void _send_cursor(Display* dpy, Window win)
   XFree(cursor);
 }
 
-static void glXSwapBuffers_no_lock( Display *dpy, GLXDrawable drawable )
+void glXSwapBuffers_no_lock( Display *dpy, GLXDrawable drawable )
 {
   //log_gl("glXSwapBuffers %d\n", drawable);
   GET_CURRENT_STATE();
