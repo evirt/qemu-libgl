@@ -66,7 +66,9 @@ int nbGLStates = 0;
 GLState** glstates = NULL;
 GLState* default_gl_state = NULL;
 
-
+static char *do_init(void);
+static int try_to_put_into_phys_memory(void* addr, int len);
+static inline int put_args_in_phys_mem(int func_number, long *args, int nb_args, int *args_type, int *arg_size, int *args_size_opt);
 
 static const char* interestingEnvVars[] =
 {
@@ -97,6 +99,7 @@ static int glfd;
 static inline int call_opengl(int func_number, void* ret_string, void* args, void* args_size)
 {
 	volatile int *i = (volatile int*)glbuffer;
+
 	i[0] = func_number;
 	/* i[1] = pid; ...is filled in by the kernel module for virtio GL */
 	i[2] = (int)ret_string;
@@ -117,48 +120,9 @@ static inline int call_opengl(int func_number, void* ret_string, void* args, voi
 	return i[0];
 }
 
-static void do_init(void)
-{
-	glfd = open("/dev/vimem", O_RDWR | O_NOCTTY | O_SYNC | O_CLOEXEC);
-
-	if(glfd == -1) {
-		fprintf(stderr, "Failed to open device\n");
-		exit(1);
-	}
-
-	glbuffer = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, glfd, 0);
-
-	if(glbuffer == MAP_FAILED) {
-		fprintf(stderr, "Failed to map buffer - dying horribly\n");
-		exit(1);
-	}
-}
-
-static int try_to_put_into_phys_memory(void* addr, int len)
-{
-  if (addr == NULL || len == 0) return 0;
-  int i;
-  void* aligned_addr = (void*)((long)addr & (~(pagesize - 1)));
-  int to_end_page = (long)aligned_addr + pagesize - (long)addr;
-  char c = 0;
-  if (aligned_addr != addr)
-  {
-    c += ((char*)addr)[0];
-    if (len <= to_end_page)
-    {
-      return c;
-    }
-    len -= to_end_page;
-    addr = aligned_addr + pagesize;
-  }
-  for(i=0;i<len;i+=pagesize)
-  {
-    c += ((char*)addr)[0];
-    addr += pagesize;
-  }
-  return c;
-}
-
+static int exists_on_server_side[GL_N_CALLS];
+static char* command_buffer = NULL;
+static int enable_gl_buffering = 0;
 static int disable_warning_for_gl_read_pixels = 0;
 
 /* Must only be called if the global lock has already been taken ! */
@@ -177,81 +141,13 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
   int ret_int = 0;
   int i;
 
-  static char* command_buffer = NULL;
   static int command_buffer_size = 0;
   static int last_command_buffer_size = -1;
   static char* ret_string = NULL;
-  static int enable_gl_buffering = 0;
-  static int last_current_thread = -1;
-  static int exists_on_server_side[GL_N_CALLS];
-
   int current_thread = pthread_self();
 
-  if (ret_string == NULL)
-  {
-    /* Sanity checks */
-    assert(tab_args_type_length[TYPE_OUT_128UCHAR] == 128 * sizeof(char));
-    assert(tab_args_type_length[TYPE_OUT_ARRAY_DOUBLE_OF_LENGTH_DEPENDING_ON_PREVIOUS_ARGS] == sizeof(double));
-
-//FIXMEIM - breaks compilation    assert(sizeof(tab_args_type_length)/sizeof(tab_args_type_length[0]) == TYPE_LAST);
-
-    memset(exists_on_server_side, 255, sizeof(exists_on_server_side));
-    exists_on_server_side[glXGetProcAddress_fake_func] = 1;
-    exists_on_server_side[glXGetProcAddress_global_fake_func] = 1;
-
-    FILE* f = fopen("/tmp/.opengl_client", "rb");
-    if (!f)
-      f = fopen("opengl_client.txt", "rb");
-    if (f)
-    {
-      char buffer[80];
-      while (fgets(buffer, 80, f))
-      {
-        for(i=0;i<sizeof(interestingEnvVars)/sizeof(interestingEnvVars[0]);i++)
-        {
-          char tmp[256];
-          strcpy(tmp, interestingEnvVars[i]);
-          strcat(tmp, "=");
-          if (strncmp(buffer, tmp, strlen(tmp)) == 0)
-          {
-            char* c= strdup(buffer+strlen(tmp));
-            char* c2 = strchr(c, '\n');
-            if (c2) *c2 = 0;
-            setenv(interestingEnvVars[i], c,1);
-            break;
-          }
-        }
-      }
-      fclose(f);
-    }
-
-    last_current_thread = current_thread;
-
-    do_init();
-
-    pagesize = getpagesize();
-    debug_gl = getenv("DEBUG_GL") != NULL;
-    debug_array_ptr = getenv("DEBUG_ARRAY_PTR") != NULL;
-    disable_optim = getenv("DISABLE_OPTIM") != NULL;
-    limit_fps = getenv("LIMIT_FPS") ? atoi(getenv("LIMIT_FPS")) : 0;
-
-    posix_memalign((void**)&ret_string, pagesize, RET_STRING_SIZE);
-    memset(ret_string, 0, RET_STRING_SIZE);
-    mlock(ret_string, RET_STRING_SIZE);
-
-    posix_memalign((void**)&command_buffer, pagesize, SIZE_BUFFER_COMMAND);
-    mlock(command_buffer, SIZE_BUFFER_COMMAND);
-
-    int init_ret = 0;
-    init_ret = call_opengl(_init_func, NULL, NULL, NULL);
-    if (init_ret == 0)
-    {
-      log_gl("You maybe forgot to launch QEMU with -enable-gl argument.\n");
-      log_gl("exiting !\n");
-      exit(-1);
-    }
-    enable_gl_buffering = (init_ret == 2) && (getenv("ENABLE_GL_BUFFERING") != NULL);
-  }
+  if (!ret_string)
+    ret_string = do_init();
 
   if (exists_on_server_side[func_number] == -1)
   {
@@ -318,92 +214,17 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
     goto end_do_opengl_call;
   }
 
-  for(i=0;i<nb_args;i++)
-  {
-    switch(args_type[i])
-    {
-      case TYPE_UNSIGNED_INT:
-      case TYPE_INT:
-      case TYPE_UNSIGNED_CHAR:
-      case TYPE_CHAR:
-      case TYPE_UNSIGNED_SHORT:
-      case TYPE_SHORT:
-      case TYPE_FLOAT:
-      {
-        this_func_parameter_size += sizeof(int);
-        break;
-      }
-
-      CASE_IN_UNKNOWN_SIZE_POINTERS:
-      {
-        args_size[i] = args_size_opt[i];
-        if (args_size[i] < 0)
-        {
-          log_gl("size < 0 : func=%s, param=%d\n", tab_opengl_calls_name[func_number], i);
-          goto end_do_opengl_call;
-        }
-        try_to_put_into_phys_memory((void*)args[i], args_size[i]);
-        this_func_parameter_size += sizeof(int) + args_size[i];
-        break;
-      }
-
-      case TYPE_NULL_TERMINATED_STRING:
-      {
-        args_size[i] = strlen((const char*)args[i]) + 1;
-        this_func_parameter_size += sizeof(int) + args_size[i];
-        break;
-      }
-
-      CASE_IN_LENGTH_DEPENDING_ON_PREVIOUS_ARGS:
-      CASE_OUT_LENGTH_DEPENDING_ON_PREVIOUS_ARGS:
-      {
-        args_size[i] = compute_arg_length(get_err_file(), func_number, i, args);
-        this_func_parameter_size += args_size[i];
-        break;
-      }
-
-      case TYPE_IN_IGNORED_POINTER:
-      {
-        args_size[i] = 0;
-        break;
-      }
-
-      CASE_OUT_UNKNOWN_SIZE_POINTERS:
-      {
-        args_size[i] = args_size_opt[i];
-        if (args_size[i] < 0)
-        {
-          log_gl("size < 0 : func=%s, param=%d\n", tab_opengl_calls_name[func_number], i);
-          goto end_do_opengl_call;
-        }
-        try_to_put_into_phys_memory((void*)args[i], args_size[i]);
-        break;
-      }
-
-      case TYPE_DOUBLE:
-      CASE_KNOWN_SIZE_POINTERS:
-      {
-        args_size[i] = tab_args_type_length[args_type[i]];
-        try_to_put_into_phys_memory((void*)args[i], args_size[i]);
-        this_func_parameter_size += args_size[i];
-        break;
-      }
-
-      default:
-      {
-        log_gl("(1) unexpected arg type %d at i=%d\n", args_type[i], i);
-        exit(-1);
-        break;
-      }
-    }
-  }
+  this_func_parameter_size += put_args_in_phys_mem(func_number, args, nb_args, args_type, args_size, args_size_opt);
 
   if (debug_gl) display_gl_call(get_err_file(), func_number, args, args_size);
 
+  /* If call is bufferable */
   if (enable_gl_buffering && signature->ret_type == TYPE_NONE && signature->has_out_parameters == 0 &&
       !(func_number == glXSwapBuffers_func || func_number == glFlush_func || func_number == glFinish_func))
   {
     assert(ret_ptr == NULL);
+
+    /* If buffer is full, drain buffer */
     if (this_func_parameter_size + command_buffer_size >= SIZE_BUFFER_COMMAND)
     {
       if (debug_gl)
@@ -414,6 +235,7 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
       last_command_buffer_size = -1;
     }
 
+    /* If the call will now fit in the buffer... */
     if (this_func_parameter_size + command_buffer_size < SIZE_BUFFER_COMMAND)
     {
       /*if (debug_gl)
@@ -424,6 +246,7 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
 
       for(i=0;i<nb_args;i++)
       {
+
         switch(args_type[i])
         {
           case TYPE_UNSIGNED_INT:
@@ -441,18 +264,17 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
 
           CASE_IN_UNKNOWN_SIZE_POINTERS:
           case TYPE_NULL_TERMINATED_STRING:
-          {
+
             *(int*)(command_buffer + command_buffer_size) = args_size[i];
             command_buffer_size += sizeof(int);
 
-            if (args_size[i])
-            {
-              memcpy(command_buffer + command_buffer_size, (void*)args[i], args_size[i]);
-              command_buffer_size += args_size[i];
-            }
-            break;
-          }
+            if (!args_size[i])
+		break;
 
+          /* Fall through */
+
+          case TYPE_DOUBLE:
+          CASE_IN_KNOWN_SIZE_POINTERS:
           CASE_IN_LENGTH_DEPENDING_ON_PREVIOUS_ARGS:
           {
             memcpy(command_buffer + command_buffer_size, (void*)args[i], args_size[i]);
@@ -465,14 +287,6 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
             break;
           }
 
-          case TYPE_DOUBLE:
-          CASE_IN_KNOWN_SIZE_POINTERS:
-          {
-            memcpy(command_buffer + command_buffer_size, (void*)args[i], args_size[i]);
-            command_buffer_size += args_size[i];
-            break;
-          }
-
           default:
           {
             log_gl("(2) unexpected arg type %d at i=%d\n", args_type[i], i);
@@ -481,9 +295,12 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
           }
         }
       }
+
     }
     else
     {
+      /* Call too big for the buffer. Safe not to flush buffer as this can
+         only happen after a buffer flush anyway. */
       if (debug_gl)
         log_gl("too large opengl call.\n");
       call_opengl(func_number, NULL, args, args_size);
@@ -586,4 +403,204 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
 end_do_opengl_call:
   (void)0;
 }
+
+static char *do_init(void)
+{
+  int current_thread = pthread_self();
+  int i;
+  char* ret_string = NULL;
+
+    /* Sanity checks */
+    assert(tab_args_type_length[TYPE_OUT_128UCHAR] == 128 * sizeof(char));
+    assert(tab_args_type_length[TYPE_OUT_ARRAY_DOUBLE_OF_LENGTH_DEPENDING_ON_PREVIOUS_ARGS] == sizeof(double));
+
+//FIXMEIM - breaks compilation    assert(sizeof(tab_args_type_length)/sizeof(tab_args_type_length[0]) == TYPE_LAST);
+
+    memset(exists_on_server_side, 255, sizeof(exists_on_server_side));
+    exists_on_server_side[glXGetProcAddress_fake_func] = 1;
+    exists_on_server_side[glXGetProcAddress_global_fake_func] = 1;
+
+    FILE* f = fopen("/tmp/.opengl_client", "rb");
+    if (!f)
+      f = fopen("opengl_client.txt", "rb");
+    if (f)
+    {
+      char buffer[80];
+      while (fgets(buffer, 80, f))
+      {
+        for(i=0;i<sizeof(interestingEnvVars)/sizeof(interestingEnvVars[0]);i++)
+        {
+          char tmp[256];
+          strcpy(tmp, interestingEnvVars[i]);
+          strcat(tmp, "=");
+          if (strncmp(buffer, tmp, strlen(tmp)) == 0)
+          {
+            char* c= strdup(buffer+strlen(tmp));
+            char* c2 = strchr(c, '\n');
+            if (c2) *c2 = 0;
+            setenv(interestingEnvVars[i], c,1);
+            break;
+          }
+        }
+      }
+      fclose(f);
+    }
+
+
+    last_current_thread = current_thread;
+
+        glfd = open("/dev/vimem", O_RDWR | O_NOCTTY | O_SYNC | O_CLOEXEC);
+
+        if(glfd == -1) {
+                fprintf(stderr, "Failed to open device\n");
+                exit(1);
+        }
+
+        glbuffer = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, glfd, 0);
+
+        if(glbuffer == MAP_FAILED) {
+                fprintf(stderr, "Failed to map buffer - dying horribly\n");
+                exit(1);
+        }
+
+        pagesize = getpagesize();
+    debug_gl = getenv("DEBUG_GL") != NULL;
+    debug_array_ptr = getenv("DEBUG_ARRAY_PTR") != NULL;
+    disable_optim = getenv("DISABLE_OPTIM") != NULL;
+    limit_fps = getenv("LIMIT_FPS") ? atoi(getenv("LIMIT_FPS")) : 0;
+
+    posix_memalign((void**)&ret_string, pagesize, RET_STRING_SIZE);
+    memset(ret_string, 0, RET_STRING_SIZE);
+    mlock(ret_string, RET_STRING_SIZE);
+
+    posix_memalign((void**)&command_buffer, pagesize, SIZE_BUFFER_COMMAND);
+    mlock(command_buffer, SIZE_BUFFER_COMMAND);
+
+    int init_ret = 0;
+    init_ret = call_opengl(_init_func, NULL, NULL, NULL);
+    if (init_ret == 0)
+    {
+      log_gl("You maybe forgot to launch QEMU with -enable-gl argument.\n");
+      log_gl("exiting !\n");
+      exit(-1);
+    }
+    enable_gl_buffering = (init_ret == 2) && (getenv("ENABLE_GL_BUFFERING") != NULL);
+    fprintf(stderr, "Enable buffering: %s (%d)\n", enable_gl_buffering?"yes":"no", init_ret);
+
+    return ret_string;
+}
+
+static int try_to_put_into_phys_memory(void* addr, int len)
+{
+  if (addr == NULL || len == 0) return 0;
+  int i;
+  void* aligned_addr = (void*)((long)addr & (~(pagesize - 1)));
+  int to_end_page = (long)aligned_addr + pagesize - (long)addr;
+  char c = 0;
+  if (aligned_addr != addr)
+  {
+    c += ((char*)addr)[0];
+    if (len <= to_end_page)
+    {
+      return c;
+    }
+    len -= to_end_page;
+    addr = aligned_addr + pagesize;
+  }
+  for(i=0;i<len;i+=pagesize)
+  {
+    c += ((char*)addr)[0];
+    addr += pagesize;
+  }
+  return c;
+}
+
+static inline int put_args_in_phys_mem(int func_number, long *args, int nb_args, int *args_type, int *args_size, int *args_size_opt)
+{
+  int this_func_parameter_size = 0;
+  int i;
+
+  for(i=0;i<nb_args;i++)
+  {
+    switch(args_type[i])
+    {
+      case TYPE_UNSIGNED_INT:
+      case TYPE_INT:
+      case TYPE_UNSIGNED_CHAR:
+      case TYPE_CHAR:
+      case TYPE_UNSIGNED_SHORT:
+      case TYPE_SHORT:
+      case TYPE_FLOAT:
+      {
+        this_func_parameter_size += sizeof(int);
+        break;
+      }
+
+      CASE_IN_UNKNOWN_SIZE_POINTERS:
+      {
+        args_size[i] = args_size_opt[i];
+        if (args_size[i] < 0)
+        {
+          log_gl("size < 0 : func=%s, param=%d\n", tab_opengl_calls_name[func_number], i);
+          exit(1);
+        }
+        try_to_put_into_phys_memory((void*)args[i], args_size[i]);
+        this_func_parameter_size += sizeof(int) + args_size[i];
+        break;
+      }
+
+      case TYPE_NULL_TERMINATED_STRING:
+      {
+        args_size[i] = strlen((const char*)args[i]) + 1;
+        this_func_parameter_size += sizeof(int) + args_size[i];
+        break;
+      }
+
+      CASE_IN_LENGTH_DEPENDING_ON_PREVIOUS_ARGS:
+      CASE_OUT_LENGTH_DEPENDING_ON_PREVIOUS_ARGS:
+      {
+        args_size[i] = compute_arg_length(get_err_file(), func_number, i, args);
+        this_func_parameter_size += args_size[i];
+        break;
+      }
+
+      case TYPE_IN_IGNORED_POINTER:
+      {
+        args_size[i] = 0;
+        break;
+      }
+
+      CASE_OUT_UNKNOWN_SIZE_POINTERS:
+      {
+        args_size[i] = args_size_opt[i];
+        if (args_size[i] < 0)
+        {
+          log_gl("size < 0 : func=%s, param=%d\n", tab_opengl_calls_name[func_number], i);
+          exit(1);
+        }
+        try_to_put_into_phys_memory((void*)args[i], args_size[i]);
+        break;
+      }
+
+      case TYPE_DOUBLE:
+      CASE_KNOWN_SIZE_POINTERS:
+      {
+        args_size[i] = tab_args_type_length[args_type[i]];
+        try_to_put_into_phys_memory((void*)args[i], args_size[i]);
+        this_func_parameter_size += args_size[i];
+        break;
+      }
+
+      default:
+      {
+        log_gl("(1) unexpected arg type %d at i=%d\n", args_type[i], i);
+        exit(-1);
+        break;
+      }
+    }
+  }
+
+  return this_func_parameter_size;
+}
+
 
