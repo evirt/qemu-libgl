@@ -68,7 +68,7 @@ GLState* default_gl_state = NULL;
 
 static char *do_init(void);
 static int try_to_put_into_phys_memory(void* addr, int len);
-static inline int put_args_in_phys_mem(int func_number, long *args, int nb_args, int *args_type, int *arg_size, int *args_size_opt);
+static inline int put_args_in_phys_mem(int func_number, long *args, int nb_args, int *args_type, int **arg_size, int *args_size_opt, char **args_buf);
 
 static const char* interestingEnvVars[] =
 {
@@ -122,6 +122,9 @@ static inline int call_opengl(int func_number, void* ret_string, void* args, voi
 
 static int exists_on_server_side[GL_N_CALLS];
 static char* command_buffer = NULL;
+static int* args_size_buffer = NULL;
+static char* cur_args_buffer = NULL;
+static int* cur_args_size_buffer = NULL;
 static int enable_gl_buffering = 0;
 static int disable_warning_for_gl_read_pixels = 0;
 
@@ -205,16 +208,21 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
   int this_func_parameter_size = sizeof(short); /* func_number */
 
   /* Compress consecutive glEnableClientState calls */
-  if (!disable_optim &&
-      last_command_buffer_size != -1 &&
-      func_number == glClientActiveTexture_func &&
-      *(short*)(command_buffer + last_command_buffer_size) == glClientActiveTexture_func)
-  {
-    *(int*)(command_buffer + last_command_buffer_size + sizeof(short)) = args[0];
-    goto end_do_opengl_call;
-  }
+//  if (!disable_optim &&
+//      last_command_buffer_size != -1 &&
+//      func_number == glClientActiveTexture_func &&
+//      *(short*)(command_buffer + last_command_buffer_size) == glClientActiveTexture_func)
+//  {
+//    *(int*)(command_buffer + last_command_buffer_size + sizeof(short)) = args[0];
+//    goto end_do_opengl_call;
+//  }
 
-  this_func_parameter_size += put_args_in_phys_mem(func_number, args, nb_args, args_type, args_size, args_size_opt);
+//  if(!cur_args_buffer) {
+        cur_args_buffer = command_buffer;
+        cur_args_size_buffer = args_size_buffer;
+//  }
+
+  this_func_parameter_size += put_args_in_phys_mem(func_number, args, nb_args, args_type, &cur_args_size_buffer, args_size_opt, &cur_args_buffer);
 
   if (debug_gl) display_gl_call(get_err_file(), func_number, args, args_size);
 
@@ -329,7 +337,7 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
       { // FIXMEIM ???
       }
       else
-        ret_int = call_opengl(func_number, (signature->ret_type == TYPE_CONST_CHAR) ? ret_string : NULL, args, args_size);
+        ret_int = call_opengl(func_number, (signature->ret_type == TYPE_CONST_CHAR) ? ret_string : NULL, command_buffer, args_size_buffer);
     if (func_number == glXCreateContext_func)
     {
       if (debug_gl)
@@ -473,6 +481,8 @@ static char *do_init(void)
     memset(ret_string, 0, RET_STRING_SIZE);
     mlock(ret_string, RET_STRING_SIZE);
 
+    posix_memalign((void**)&args_size_buffer, pagesize, SIZE_BUFFER_COMMAND);
+    mlock(args_size_buffer, SIZE_BUFFER_COMMAND);
     posix_memalign((void**)&command_buffer, pagesize, SIZE_BUFFER_COMMAND);
     mlock(command_buffer, SIZE_BUFFER_COMMAND);
 
@@ -515,13 +525,17 @@ static int try_to_put_into_phys_memory(void* addr, int len)
   return c;
 }
 
-static inline int put_args_in_phys_mem(int func_number, long *args, int nb_args, int *args_type, int *args_size, int *args_size_opt)
+static inline int put_args_in_phys_mem(int func_number, long *args, int nb_args, int *args_type, int **cur_args_size, int *args_size_opt, char **cur_args)
 {
-  int this_func_parameter_size = 0;
+  int this_func_args_size = 0;
   int i;
+  char *args_buf = *cur_args;
+  int *args_size_buf = *cur_args_size;
 
+//    fprintf(stderr, "func: %d %08x %08x\n", func_number, args_buf, args_size_buf);
   for(i=0;i<nb_args;i++)
   {
+//    fprintf(stderr, "ca: %02d - %08x\n", args_type[i], args_buf-*cur_args);
     switch(args_type[i])
     {
       case TYPE_UNSIGNED_INT:
@@ -532,62 +546,74 @@ static inline int put_args_in_phys_mem(int func_number, long *args, int nb_args,
       case TYPE_SHORT:
       case TYPE_FLOAT:
       {
-        this_func_parameter_size += sizeof(int);
+        this_func_args_size += sizeof(int);
+	*args_size_buf = sizeof(int);
+    memcpy(args_buf, &args[i], *args_size_buf); args_buf += *args_size_buf; args_size_buf++;
         break;
       }
 
       CASE_IN_UNKNOWN_SIZE_POINTERS:
       {
-        args_size[i] = args_size_opt[i];
-        if (args_size[i] < 0)
+        *args_size_buf = args_size_opt[i];
+        if (*args_size_buf < 0)
         {
           log_gl("size < 0 : func=%s, param=%d\n", tab_opengl_calls_name[func_number], i);
           exit(1);
         }
-        try_to_put_into_phys_memory((void*)args[i], args_size[i]);
-        this_func_parameter_size += sizeof(int) + args_size[i];
+        try_to_put_into_phys_memory((void*)args[i], *args_size_buf);
+        this_func_args_size += *args_size_buf;
+    memcpy(args_buf, (void *)args[i], *args_size_buf); args_buf += *args_size_buf; args_size_buf++;
         break;
       }
 
       case TYPE_NULL_TERMINATED_STRING:
       {
-        args_size[i] = strlen((const char*)args[i]) + 1;
-        this_func_parameter_size += sizeof(int) + args_size[i];
+        *args_size_buf = strlen((const char*)args[i]) + 1;
+        this_func_args_size += *args_size_buf;
+    memcpy(args_buf, (void *)args[i], *args_size_buf); args_buf += *args_size_buf; args_size_buf++;
         break;
       }
 
-      CASE_IN_LENGTH_DEPENDING_ON_PREVIOUS_ARGS:
       CASE_OUT_LENGTH_DEPENDING_ON_PREVIOUS_ARGS:
+	memcpy(args_buf, (void *)&args[i], sizeof(int)); args_buf += sizeof(int);
+      CASE_IN_LENGTH_DEPENDING_ON_PREVIOUS_ARGS:
       {
-        args_size[i] = compute_arg_length(get_err_file(), func_number, i, args);
-        this_func_parameter_size += args_size[i];
+        *args_size_buf = compute_arg_length(get_err_file(), func_number, i, args);
+        this_func_args_size += *args_size_buf;
+    memcpy(args_buf, (void *)args[i], *args_size_buf); args_buf += *args_size_buf; args_size_buf++;
         break;
       }
 
       case TYPE_IN_IGNORED_POINTER:
       {
-        args_size[i] = 0;
+        *args_size_buf = 0;
+        args_size_buf++;
         break;
       }
 
       CASE_OUT_UNKNOWN_SIZE_POINTERS:
       {
-        args_size[i] = args_size_opt[i];
-        if (args_size[i] < 0)
+	memcpy(args_buf, (void *)&args[i], sizeof(int)); args_buf += sizeof(int);
+        *args_size_buf = args_size_opt[i];
+        if (*args_size_buf < 0)
         {
           log_gl("size < 0 : func=%s, param=%d\n", tab_opengl_calls_name[func_number], i);
           exit(1);
         }
-        try_to_put_into_phys_memory((void*)args[i], args_size[i]);
+        try_to_put_into_phys_memory((void*)args[i], *args_size_buf);
+    memcpy(args_buf, (void *)args[i], *args_size_buf); args_buf += *args_size_buf; args_size_buf++;
         break;
       }
 
+      CASE_OUT_KNOWN_SIZE_POINTERS:
+	memcpy(args_buf, (void *)&args[i], sizeof(int)); args_buf += sizeof(int);
       case TYPE_DOUBLE:
-      CASE_KNOWN_SIZE_POINTERS:
+      CASE_IN_KNOWN_SIZE_POINTERS:
       {
-        args_size[i] = tab_args_type_length[args_type[i]];
-        try_to_put_into_phys_memory((void*)args[i], args_size[i]);
-        this_func_parameter_size += args_size[i];
+        *args_size_buf = tab_args_type_length[args_type[i]];
+        try_to_put_into_phys_memory((void*)args[i], *args_size_buf);
+        this_func_args_size += *args_size_buf;
+    memcpy(args_buf, (void *)args[i], *args_size_buf); args_buf += *args_size_buf; args_size_buf++;
         break;
       }
 
@@ -599,8 +625,11 @@ static inline int put_args_in_phys_mem(int func_number, long *args, int nb_args,
       }
     }
   }
+	
+  *cur_args_size = args_size_buf;
+  *cur_args = args_buf;
 
-  return this_func_parameter_size;
+  return this_func_args_size;
 }
 
 
