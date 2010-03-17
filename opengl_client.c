@@ -96,7 +96,7 @@ int limit_fps = 0;
 static char *glbuffer;
 static int glfd;
 
-static inline int call_opengl(int func_number, void* ret_string, void* args, void* args_size)
+static inline int call_opengl(int func_number, void* ret_string, void* args, void* args_size, int args_len, int args_size_len)
 {
 	volatile int *i = (volatile int*)glbuffer;
 
@@ -107,6 +107,8 @@ static inline int call_opengl(int func_number, void* ret_string, void* args, voi
 	i[4] = (int)args_size;
 	i[5] = (int)glbuffer;
 	i[6] = 0;
+	i[10] = args_len;
+	i[11] = args_size_len;
 
 	fsync(glfd); // Make magic happen
 
@@ -127,6 +129,7 @@ static char* cur_args_buffer = NULL;
 static int* cur_args_size_buffer = NULL;
 static int enable_gl_buffering = 0;
 static int disable_warning_for_gl_read_pixels = 0;
+static int max_buffer_size = 0;
 
 /* Must only be called if the global lock has already been taken ! */
 void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* args_size_opt)
@@ -148,6 +151,7 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
   static int last_command_buffer_size = -1;
   static char* ret_string = NULL;
   int current_thread = pthread_self();
+  static int nr_serial;
 
   if (!ret_string)
     ret_string = do_init();
@@ -217,133 +221,52 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
 //    goto end_do_opengl_call;
 //  }
 
-//  if(!cur_args_buffer) {
+  if(!cur_args_buffer) {
         cur_args_buffer = command_buffer;
         cur_args_size_buffer = args_size_buffer;
+        nr_serial = 0;
+  }
+
+//  if(nr_serial > 1) {
+  *(short*)(cur_args_buffer) = func_number;
+  cur_args_buffer += sizeof(short);
 //  }
 
-  this_func_parameter_size += put_args_in_phys_mem(func_number, args, nb_args, args_type, &cur_args_size_buffer, args_size_opt, &cur_args_buffer);
+  put_args_in_phys_mem(func_number, args, nb_args, args_type, &cur_args_size_buffer, args_size_opt, &cur_args_buffer);
+  nr_serial++;
 
   if (debug_gl) display_gl_call(get_err_file(), func_number, args, args_size);
 
-  /* If call is bufferable */
-  if (enable_gl_buffering && signature->ret_type == TYPE_NONE && signature->has_out_parameters == 0 &&
-      !(func_number == glXSwapBuffers_func || func_number == glFlush_func || func_number == glFinish_func))
+  /* If call is not bufferable or the buffer is full. */
+  if (nr_serial >= max_buffer_size ||
+      !(signature->ret_type == TYPE_NONE &&
+        signature->has_out_parameters == 0 &&
+        !(func_number == glXSwapBuffers_func ||
+          func_number == glFlush_func ||
+          func_number == glFinish_func)))
   {
-    assert(ret_ptr == NULL);
+    if (debug_gl)
+      log_gl("flush pending opengl calls...\n");
+    try_to_put_into_phys_memory(command_buffer, SIZE_BUFFER_COMMAND);
+    if(signature->ret_type == TYPE_CONST_CHAR)
+	try_to_put_into_phys_memory(ret_string, RET_STRING_SIZE);
+    ret_int = call_opengl(_serialized_calls_func, (signature->ret_type == TYPE_CONST_CHAR) ? ret_string : NULL, command_buffer, args_size_buffer, cur_args_buffer - command_buffer, (char*)cur_args_size_buffer - (char*)args_size_buffer);
+    cur_args_buffer = NULL; // Reset pointers.
+  }
 
-    /* If buffer is full, drain buffer */
-    if (this_func_parameter_size + command_buffer_size >= SIZE_BUFFER_COMMAND)
-    {
-      if (debug_gl)
-        log_gl("flush pending opengl calls...\n");
-      try_to_put_into_phys_memory(command_buffer, command_buffer_size);
-      call_opengl(_serialized_calls_func, NULL, &command_buffer, &command_buffer_size);
-      command_buffer_size = 0;
-      last_command_buffer_size = -1;
-    }
-
-    /* If the call will now fit in the buffer... */
-    if (this_func_parameter_size + command_buffer_size < SIZE_BUFFER_COMMAND)
-    {
-      /*if (debug_gl)
-        log_gl("serializable opengl call.\n");*/
-      last_command_buffer_size = command_buffer_size;
-      *(short*)(command_buffer + command_buffer_size) = func_number;
-      command_buffer_size += sizeof(short);
-
-      for(i=0;i<nb_args;i++)
-      {
-
-        switch(args_type[i])
-        {
-          case TYPE_UNSIGNED_INT:
-          case TYPE_INT:
-          case TYPE_UNSIGNED_CHAR:
-          case TYPE_CHAR:
-          case TYPE_UNSIGNED_SHORT:
-          case TYPE_SHORT:
-          case TYPE_FLOAT:
-          {
-            *(int*)(command_buffer + command_buffer_size) = args[i];
-            command_buffer_size += sizeof(int);
-            break;
-          }
-
-          CASE_IN_UNKNOWN_SIZE_POINTERS:
-          case TYPE_NULL_TERMINATED_STRING:
-
-            *(int*)(command_buffer + command_buffer_size) = args_size[i];
-            command_buffer_size += sizeof(int);
-
-            if (!args_size[i])
-		break;
-
-          /* Fall through */
-
-          case TYPE_DOUBLE:
-          CASE_IN_KNOWN_SIZE_POINTERS:
-          CASE_IN_LENGTH_DEPENDING_ON_PREVIOUS_ARGS:
-          {
-            memcpy(command_buffer + command_buffer_size, (void*)args[i], args_size[i]);
-            command_buffer_size += args_size[i];
-            break;
-          }
-
-          case TYPE_IN_IGNORED_POINTER:
-          {
-            break;
-          }
-
-          default:
-          {
-            log_gl("(2) unexpected arg type %d at i=%d\n", args_type[i], i);
-            exit(-1);
-            break;
-          }
-        }
-      }
-
-    }
-    else
-    {
+//    {
       /* Call too big for the buffer. Safe not to flush buffer as this can
          only happen after a buffer flush anyway. */
-      if (debug_gl)
-        log_gl("too large opengl call.\n");
-      call_opengl(func_number, NULL, args, args_size);
-    }
-  }
-  else
-  {
-    if (command_buffer_size)
-    {
-      if (debug_gl)
-        log_gl("flush pending opengl calls...\n");
-      try_to_put_into_phys_memory(command_buffer, command_buffer_size);
-      call_opengl(_serialized_calls_func, NULL, &command_buffer, &command_buffer_size);
-      command_buffer_size = 0;
-      last_command_buffer_size = -1;
-    }
+//      if (debug_gl)
+//        log_gl("too large opengl call.\n");
+//      call_opengl(func_number, NULL, args, args_size);
+//    }
+//  }
 
-    if (!(func_number == glXSwapBuffers_func || func_number == glFlush_func  || func_number == glFinish_func || (func_number == glReadPixels_func && disable_warning_for_gl_read_pixels)) && enable_gl_buffering)
-      log_gl("synchronous opengl call : %s.\n", tab_opengl_calls_name[func_number]);
-    if (signature->ret_type == TYPE_CONST_CHAR)
-    {
-      try_to_put_into_phys_memory(ret_string, RET_STRING_SIZE);
-    }
-
-      if (getenv("GET_IMG_FROM_SERVER") != NULL && func_number == glXSwapBuffers_func)
-      { // FIXMEIM ???
-      }
-      else
-        ret_int = call_opengl(func_number, (signature->ret_type == TYPE_CONST_CHAR) ? ret_string : NULL, command_buffer, args_size_buffer);
-    if (func_number == glXCreateContext_func)
-    {
-      if (debug_gl)
-        log_gl("ret_int = %d\n", ret_int);
-    }
-    else if (func_number == glXSwapBuffers_func || func_number == glFinish_func || func_number == glFlush_func)
+#if 0
+//    if (!(func_number == glXSwapBuffers_func || func_number == glFlush_func  || func_number == glFinish_func || (func_number == glReadPixels_func && disable_warning_for_gl_read_pixels)) && enable_gl_buffering)
+//      log_gl("synchronous opengl call : %s.\n", tab_opengl_calls_name[func_number]);
+    if (func_number == glXSwapBuffers_func || func_number == glFinish_func || func_number == glFlush_func)
     {
       if (getenv("GET_IMG_FROM_SERVER"))
       {
@@ -391,6 +314,7 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
       else
         call_opengl(_synchronize_func, NULL, NULL, NULL);
     }
+#endif
 
     if (signature->ret_type == TYPE_UNSIGNED_INT ||
         signature->ret_type == TYPE_INT)
@@ -406,7 +330,6 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
     {
       *(char**)(ret_ptr) = ret_string;
     }
-  }
 
 end_do_opengl_call:
   (void)0;
@@ -487,7 +410,7 @@ static char *do_init(void)
     mlock(command_buffer, SIZE_BUFFER_COMMAND);
 
     int init_ret = 0;
-    init_ret = call_opengl(_init_func, NULL, NULL, NULL);
+    init_ret = call_opengl(_init_func, NULL, NULL, NULL, 0, 0);
     if (init_ret == 0)
     {
       log_gl("You maybe forgot to launch QEMU with -enable-gl argument.\n");
@@ -496,6 +419,10 @@ static char *do_init(void)
     }
     enable_gl_buffering = (init_ret == 2) && (getenv("ENABLE_GL_BUFFERING") != NULL);
     fprintf(stderr, "Enable buffering: %s (%d)\n", enable_gl_buffering?"yes":"no", init_ret);
+    if(enable_gl_buffering)
+       max_buffer_size = 10;
+    else
+       max_buffer_size = 1;
 
     return ret_string;
 }
@@ -560,7 +487,7 @@ static inline int put_args_in_phys_mem(int func_number, long *args, int nb_args,
           log_gl("size < 0 : func=%s, param=%d\n", tab_opengl_calls_name[func_number], i);
           exit(1);
         }
-        try_to_put_into_phys_memory((void*)args[i], *args_size_buf);
+//        try_to_put_into_phys_memory((void*)args[i], *args_size_buf);
         this_func_args_size += *args_size_buf;
     memcpy(args_buf, (void *)args[i], *args_size_buf); args_buf += *args_size_buf; args_size_buf++;
         break;

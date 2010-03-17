@@ -1,5 +1,5 @@
 BUILD_CC := gcc
-GL_CFLAGS := -Wall -g -O2 -fno-strict-aliasing
+GL_CFLAGS := -Wall -g -O0 -fno-strict-aliasing
 
 all: libGL.so.1.2
 
