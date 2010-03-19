@@ -27,14 +27,8 @@
 #include <string.h>
 
 #include "opengl_func.h"
+#include "opengl_utils.h"
 #include "log.h"
-
-typedef struct
-{
-  unsigned int* values;
-  int nbValues;
-} RangeAllocator;
-
 
 /*
 void print_range(RangeAllocator* range)
@@ -335,6 +329,7 @@ void display_gl_call(FILE* f, int func_number, long* args, int* args_size)
 
   for(i=0;i<nb_args;i++)
   {
+    fprintf(stderr, "t(%d)", args_type[i]);
     switch(args_type[i])
     {
       case TYPE_UNSIGNED_CHAR:
@@ -676,9 +671,8 @@ void removeUnwantedExtensions(char* ret)
   free(toBeRemoved);
 }
 
-int compute_arg_length(FILE* err_file, int func_number, int arg_i, long* args)
+int compute_arg_length(int func_number, Signature *signature, int arg_i, long* args)
 {
-  Signature* signature = (Signature*)tab_opengl_calls[func_number];
   int* args_type = signature->args_type;
 
   switch (func_number)
@@ -816,7 +810,7 @@ int compute_arg_length(FILE* err_file, int func_number, int arg_i, long* args)
     case glGetFragmentLightfvSGIX_func:
     case glGetFragmentLightivSGIX_func:
       if (arg_i == signature->nb_args - 1)
-        return __glLight_size(err_file, args[arg_i-1]) * tab_args_type_length[args_type[arg_i]];
+        return __glLight_size(get_err_file(), args[arg_i-1]) * tab_args_type_length[args_type[arg_i]];
       break;
 
     case glLightModelfv_func:
@@ -840,7 +834,7 @@ int compute_arg_length(FILE* err_file, int func_number, int arg_i, long* args)
     case glGetFragmentMaterialfvSGIX_func:
     case glGetFragmentMaterialivSGIX_func:
       if (arg_i == signature->nb_args - 1)
-        return __glMaterial_size(err_file, args[arg_i-1]) * tab_args_type_length[args_type[arg_i]];
+        return __glMaterial_size(get_err_file(), args[arg_i-1]) * tab_args_type_length[args_type[arg_i]];
       break;
 
     case glTexParameterfv_func:
@@ -852,7 +846,7 @@ int compute_arg_length(FILE* err_file, int func_number, int arg_i, long* args)
     case glGetTexParameterIivEXT_func:
     case glGetTexParameterIuivEXT_func:
       if (arg_i == signature->nb_args - 1)
-        return __glTexParameter_size(err_file, args[arg_i-1]) * tab_args_type_length[args_type[arg_i]];
+        return __glTexParameter_size(get_err_file(), args[arg_i-1]) * tab_args_type_length[args_type[arg_i]];
       break;
 
     case glFogiv_func:
@@ -965,7 +959,6 @@ int compute_arg_length(FILE* err_file, int func_number, int arg_i, long* args)
       break;
   }
 
-  fprintf(err_file, "invalid combination for compute_arg_length : func_number=%d, arg_i=%d\n", func_number, arg_i);
   return 0;
 }
 
