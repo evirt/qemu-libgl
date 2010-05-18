@@ -531,52 +531,143 @@ Bool glXQueryVersion( Display *dpy, int *maj, int *min )
 }
 
 
-static void _get_window_pos(Display *dpy, Window win, WindowPosStruct* pos)
+static void _get_window_info(Display *dpy, Window win, WindowInfoStruct* info)
 {
-  XWindowAttributes window_attributes_return;
-  Window child;
-  int x, y;
-  Window root = DefaultRootWindow(dpy);
-  XGetWindowAttributes(dpy, win, &window_attributes_return);
-  XTranslateCoordinates(dpy, win, root, 0, 0, &x, &y, &child);
-  /*printf("%d %d %d %d\n", x, y, window_attributes_return.width, window_attributes_return.height);*/
-  pos->x = x;
-  pos->y = y;
-  pos->width = window_attributes_return.width;
-  pos->height = window_attributes_return.height;
-  pos->map_state = window_attributes_return.map_state;
+  XWindowAttributes attr;
+
+  XGetWindowAttributes(dpy, win, &attr);
+
+  info->width     = attr.width;
+  info->height    = attr.height;
+  info->map_state = attr.map_state;
+}
+
+static RendererData *renderer_create_image(Display *dpy, int w, int h)
+{
+  RendererData *rdata = calloc(1, sizeof(*rdata));
+
+  if(!rdata)
+    goto out;
+
+  rdata->w = w;
+  rdata->h = h;
+
+  rdata->image = XShmCreateImage(dpy, DefaultVisual(dpy, 0), 24, ZPixmap, NULL,
+                                 &rdata->shminfo, w, h);
+  
+  if(!rdata->image)
+    goto out_free_rdata;
+
+  rdata->shminfo.shmid = shmget(IPC_PRIVATE, rdata->image->bytes_per_line * h,
+                                IPC_CREAT | 0777);
+  if(rdata->shminfo.shmid == -1) {
+    goto out_destroy_img;
+  }
+
+  rdata->shminfo.shmaddr = shmat(rdata->shminfo.shmid, NULL,0);
+  if(rdata->shminfo.shmaddr == -1)
+    goto out_shmput;
+
+  rdata->buffer = rdata->shminfo.shmaddr;
+  rdata->image->data = rdata->buffer;
+
+  rdata->shminfo.readOnly = False;
+
+  XShmAttach(dpy, &rdata->shminfo);
+  fprintf(stderr, "Attach: %d\n", &rdata->shminfo);
+  XSync(dpy, 0);
+
+  if(!rdata)
+    fprintf(stderr, "Failed creating image\n");
+  return rdata;
+
+out_shmput:
+  shmctl(rdata->shminfo.shmid, IPC_RMID, NULL);
+out_destroy_img:
+  XDestroyImage(rdata->image);
+out_free_rdata:
+  free(rdata);
+out:
+  return NULL;
+}
+
+static void renderer_destroy_image(Display *dpy, RendererData *rdata) {
+  if(!rdata) {
+    fprintf(stderr, "Nothing to destroy!!!!!\n"); // FIXMEIM BUG!
+    return;
+  }
+  fprintf(stderr, "Detach: %d\n", &rdata->shminfo);
+  XShmDetach(dpy, &rdata->shminfo);
+  rdata->image->data = NULL;
+  XDestroyImage(rdata->image);
+  shmdt(rdata->shminfo.shmaddr);
+  shmctl(rdata->shminfo.shmid, IPC_RMID, NULL);
+  free(rdata);
 }
 
 #define MAX_PBUFFERS 100
 
 /* Doit être appelé avec le lock */
-static void _move_win_if_necessary(Display *dpy, Window win)
+static void _update_renderer(Display *dpy, Window win)
 {
   GET_CURRENT_STATE();
-  if ((int)win < MAX_PBUFFERS) /* FIXME */
-  {
+  WindowInfoStruct info;
+  WindowInfoStruct *old_info = &state->last_win_state;
+  int ck, i;
+
+  if(!win)
     return;
+
+  _get_window_info(dpy, win, &info);
+
+ck = 0 ;
+if(state->renderer_data)
+  for(i = 0 ; i < sizeof(*state->renderer_data) ; i++)
+    ck += ((char*)state->renderer_data)[i];
+
+fprintf(stderr, "win: %08x  ck: %08x\n", win, ck);
+
+  if(info.map_state != IsViewable) {
+    fprintf(stderr, "unmapped!\n");
+//    if(state->renderer_data);
+//      renderer_destroy_image(dpy, state->renderer_data);
+    state->renderer_data = NULL;
+    goto out;
   }
 
-  WindowPosStruct pos;
-  _get_window_pos(dpy, win, &pos);
-  if (memcmp(&pos, &state->oldPos, sizeof(state->oldPos)) != 0)
-  {
-    if (pos.map_state != state->oldPos.map_state ||
-                    pos.map_state != IsViewable)
-    {
-      /* Hack: since we can't request a callback at the precise moment
-       * the window becomes visible, make it always visible, otherwise
-       * if during a glXSwapBuffers the windows is not visible, we can't
-       * send the event up until the next glXSwapBuffers.  */
-      /* long args[] = { INT_TO_ARG(win), INT_TO_ARG(pos.map_state) }; */
-      long args[] = { INT_TO_ARG(win), IsViewable };
-      do_opengl_call_no_lock(_changeWindowState_func, NULL, args, NULL);
-    }
-    memcpy(&state->oldPos, &pos, sizeof(state->oldPos));
-    long args[] = { INT_TO_ARG(win), POINTER_TO_ARG(&pos) };
-    do_opengl_call_no_lock(_moveResizeWindow_func, NULL, args, NULL);
+  if(!state->renderer_data)
+    state->renderer_data = renderer_create_image(dpy, info.width, info.height);
+  if(!state->renderer_data)
+    fprintf(stderr, "Fucked up!\n");
+
+  if ((info.width != old_info->width) || (info.height != old_info->height)) {
+
+    if(state->renderer_data)
+      renderer_destroy_image(dpy, state->renderer_data);
+
+    state->renderer_data = renderer_create_image(dpy, info.width, info.height);
+
+    long args[] = { INT_TO_ARG(win), POINTER_TO_ARG(&info), INT_TO_ARG(0), POINTER_TO_ARG(0)};
+    int args_size[] = {0, 0, 0, 0};
+    do_opengl_call_no_lock(_moveResizeWindow_func, NULL, args, args_size);
+
+    goto out;
   }
+
+//  fprintf(stderr, "stride: %d\n", state->renderer_data->image->bytes_per_line);
+  long args[] = { INT_TO_ARG(win), POINTER_TO_ARG(&info), INT_TO_ARG(state->renderer_data->image->bytes_per_line), POINTER_TO_ARG(state->renderer_data->buffer)};
+  int args_size[] = {0, 0, 0, state->renderer_data->image->bytes_per_line*state->renderer_data->h};
+  do_opengl_call_no_lock(_moveResizeWindow_func, NULL, args, args_size);
+
+  /* draw into window */
+  XShmPutImage(dpy, win, DefaultGC(dpy, 0), state->renderer_data->image,
+               0, 0, 0, 0, state->renderer_data->w, state->renderer_data->h,
+               False);
+
+  XFlush(dpy);
+
+out:
+  memcpy(old_info, &info, sizeof(info));
 }
 
 Bool glXMakeCurrent_no_lock( Display *dpy, GLXDrawable drawable, GLXContext ctx)
@@ -626,7 +717,7 @@ Bool glXMakeCurrent_no_lock( Display *dpy, GLXDrawable drawable, GLXContext ctx)
           long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(drawable), INT_TO_ARG(ctx) };
           do_opengl_call_no_lock(glXMakeCurrent_func, NULL /*&ret*/, args, NULL);
           ret = True;
-          _move_win_if_necessary(dpy, drawable);
+          _update_renderer(dpy, drawable);
         }
         break;
       }
@@ -642,7 +733,7 @@ Bool glXMakeCurrent_no_lock( Display *dpy, GLXDrawable drawable, GLXContext ctx)
     long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(drawable), INT_TO_ARG(ctx) };
     do_opengl_call_no_lock(glXMakeCurrent_func, NULL /*&ret*/, args, NULL);
     ret = True;
-    _move_win_if_necessary(dpy, drawable);
+    _update_renderer(dpy, drawable);
   }
 
   if (ret)
@@ -820,90 +911,14 @@ end_of_glx_get_config:
   return ret;
 }
 
-/* Doit être appelé avec le lock */
-static void _send_cursor(Display* dpy, Window win)
-{
-  GET_CURRENT_STATE();
-  XFixesCursorImage* cursor = XFixesGetCursorImage(dpy);
-  Window child_return, root_return;
-  int root_x_return, root_y_return, win_x_return, win_y_return;
-  unsigned int mask_return;
-  XQueryPointer(dpy, win, &root_return, &child_return, &root_x_return, &root_y_return,
-                &win_x_return, &win_y_return, &mask_return);
-  cursor->x = win_x_return;
-  cursor->y = win_y_return;
-
-
-  if (cursor->width == state->last_cursor.width &&
-      cursor->height == state->last_cursor.height &&
-      cursor->xhot == state->last_cursor.xhot &&
-      cursor->yhot == state->last_cursor.yhot &&
-      memcmp(cursor->pixels, state->last_cursor.pixels, sizeof(long) * cursor->width * cursor->height) == 0)
-  {
-    if (!(cursor->x == state->last_cursor.x &&
-          cursor->y == state->last_cursor.y))
-    {
-      long args[] = { INT_TO_ARG(cursor->x), INT_TO_ARG(cursor->y),
-                      INT_TO_ARG(cursor->width), INT_TO_ARG(cursor->height),
-                      INT_TO_ARG(cursor->xhot), INT_TO_ARG(cursor->yhot),
-                      0 };
-      int args_size[] = { 0, 0, 0, 0, 0, 0, 0 };
-      do_opengl_call_no_lock(_send_cursor_func, NULL, CHECK_ARGS(args, args_size));
-
-      state->last_cursor.x = cursor->x;
-      state->last_cursor.y = cursor->y;
-    }
-    XFree(cursor);
-    return;
-  }
-  int* data;
-
-  /* Fun stuff about the 'pixels' field of XFixesCursorImage. It's a long instead of an int */
-  /* The interface chosen for serialization is an array of int */
-  if (sizeof(long) != sizeof(int))
-  {
-    data = malloc(sizeof(int) * cursor->width * cursor->height);
-    int i;
-    for(i=0;i<cursor->width*cursor->height;i++)
-    {
-      data[i] = (int)cursor->pixels[i];
-    }
-  }
-  else
-  {
-    data = (int*)cursor->pixels;
-  }
-
-  long args[] = { INT_TO_ARG(cursor->x), INT_TO_ARG(cursor->y),
-                  INT_TO_ARG(cursor->width), INT_TO_ARG(cursor->height),
-                  INT_TO_ARG(cursor->xhot), INT_TO_ARG(cursor->yhot),
-                  POINTER_TO_ARG(data) };
-  int args_size[] = { 0, 0, 0, 0, 0, 0, sizeof(int) * cursor->width * cursor->height };
-  do_opengl_call_no_lock(_send_cursor_func, NULL, CHECK_ARGS(args, args_size));
-
-  void* prev_ptr = state->last_cursor.pixels;
-  memcpy(&state->last_cursor, cursor, sizeof(XFixesCursorImage));
-  state->last_cursor.pixels = realloc(prev_ptr, sizeof(long) * cursor->width * cursor->height);
-  memcpy(state->last_cursor.pixels, cursor->pixels, sizeof(long) * cursor->width * cursor->height);
-
-  if (sizeof(long) != sizeof(int))
-  {
-    free(data);
-  }
-  XFree(cursor);
-}
-
 void glXSwapBuffers_no_lock( Display *dpy, GLXDrawable drawable )
 {
   //log_gl("glXSwapBuffers %d\n", drawable);
   GET_CURRENT_STATE();
   long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(drawable) };
   do_opengl_call_no_lock(glXSwapBuffers_func, NULL, args, NULL);
-  if (getenv("GET_IMG_FROM_SERVER") == NULL)
-  {
-    _move_win_if_necessary(dpy, drawable);
-  }
-  _send_cursor(dpy, drawable);
+
+  _update_renderer(dpy, drawable);
 
   if (limit_fps > 0)
   {
@@ -1388,6 +1403,7 @@ GLAPI GLXWindow APIENTRY glXCreateWindow( Display *dpy, GLXFBConfig config, Wind
 {
   CHECK_PROC_WITH_RET(glXCreateWindow);
   /* do nothing. Not sure about this implementation. FIXME */
+  fprintf(stderr, "createwindow?\n");
   return win;
 }
 

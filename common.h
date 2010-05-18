@@ -3,6 +3,10 @@
 #include <X11/X.h>
 #include <X11/Xutil.h>
 #include <X11/extensions/Xfixes.h>
+#include <X11/extensions/XShm.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+
 #include "mesa_glx.h"
 
 #define ENABLE_THREAD_SAFETY
@@ -15,7 +19,7 @@ extern int limit_fps;
 #define IS_GLX_CALL(x) (x >= glXChooseVisual_func && x <= glXReleaseTexImageARB_func)
 
 #define RET_STRING_SIZE 32768
-#define SIZE_BUFFER_COMMAND 1024*1024
+#define SIZE_BUFFER_COMMAND 1024*800*4
 
 #define POINTER_TO_ARG(x)            (long)(void*)(x)
 #define CHAR_TO_ARG(x)               (long)(x)
@@ -147,13 +151,10 @@ typedef struct
 
 typedef struct
 {
-  int x;
-  int y;
   int width;
   int height;
   int map_state;
-} WindowPosStruct;
-
+} WindowInfoStruct;
 
 typedef struct
 {
@@ -260,6 +261,14 @@ typedef struct
 } ServerState;
 
 
+typedef struct
+{
+  XImage *image;
+  XShmSegmentInfo shminfo;
+  int w;
+  int h;
+  char *buffer;
+} RendererData;
 
 
 typedef struct
@@ -273,6 +282,8 @@ typedef struct
   GLXContext shareList;
   XFixesCursorImage last_cursor;
   GLXPbuffer pbuffer;
+
+  RendererData *renderer_data;
 
   int isAssociatedToFBConfigVisual;
 
@@ -308,7 +319,7 @@ typedef struct
   UniformLocation* uniformLocations;
   int countUniformLocations;
 
-  WindowPosStruct oldPos;
+  WindowInfoStruct last_win_state;
   ViewportStruct viewport;
   ViewportStruct scissorbox;
   int drawable_width;

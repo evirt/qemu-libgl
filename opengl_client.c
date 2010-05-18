@@ -73,7 +73,7 @@ static char *do_init(void);
 static inline int get_args_buffer_size(int func_number, Signature *s, long *args, int *args_size_opt);
 static inline int get_ret_buffer_size(int func_number, Signature *s, long *args, int *args_size_opt);
 static inline int decode_ret_buffer(int func_number, Signature *s, long *args, char *buffer, void *ret_ptr);
-static inline void put_args_in_phys_mem(int func_number, Signature *s, long *args, int *args_size_opt, char **args_buf);
+static inline void buffer_args(int func_number, Signature *s, long *args, int *args_size_opt, char **args_buf);
 
 static const char* interestingEnvVars[] =
 {
@@ -149,7 +149,7 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
   if( ! (func_number >= 0 && func_number < GL_N_CALLS) )
   {
     log_gl("func_number >= 0 && func_number < GL_N_CALLS failed\n");
-    goto end_do_opengl_call;
+    return;
   }
 
   Signature* signature = (Signature*)tab_opengl_calls[func_number];
@@ -181,12 +181,12 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
     {
       log_gl("Symbol %s not available in server libGL. Shouldn't have reach that point...\n",
              tab_opengl_calls_name[func_number]);
-      goto end_do_opengl_call;
+      return;
     }
   }
   else if (exists_on_server_side[func_number] == 0)
   {
-    goto end_do_opengl_call;
+    return;
   }
 
   GET_CURRENT_STATE();
@@ -204,11 +204,11 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
   if (func_number == glFlush_func && getenv("HACK_XGL"))
   {
     glXSwapBuffers_no_lock(state->display, state->current_drawable);
-    goto end_do_opengl_call;
+    return;
   }
   else if ((func_number == glDrawBuffer_func || func_number == glReadBuffer_func) && getenv("HACK_XGL"))
   {
-    goto end_do_opengl_call;
+    return;
   }
 
   if ((func_number >= glRasterPos2d_func && func_number <= glRasterPos4sv_func) ||
@@ -220,7 +220,6 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
     state->currentRasterPosKnown = 0;
   }
 
-
   /* Compress consecutive glEnableClientState calls */
 //  if (!disable_optim &&
 //      last_command_buffer_size != -1 &&
@@ -231,10 +230,12 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
 //    goto end_do_opengl_call;
 //  }
 
-  again = 0;
+
   /* Try to buffer the call. If it doesnt fit (again == 1) empty the buffer
    * and retry. If it still doesnt fit (again == 2) then die.
    */
+
+  again = 0;
   do {
     if(!command_buffer)
         command_buffer = map_buffer(SIZE_BUFFER_COMMAND);
@@ -249,7 +250,7 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
     req_ret_buffer = get_ret_buffer_size(func_number, signature, args, args_size_opt);
     if(((SIZE_BUFFER_COMMAND + command_buffer - cur_args_buffer) >= req_args_buffer) && req_ret_buffer <= SIZE_BUFFER_COMMAND)
     {   
-           put_args_in_phys_mem(func_number, signature, args, args_size_opt, &cur_args_buffer);
+           buffer_args(func_number, signature, args, args_size_opt, &cur_args_buffer);
            if(again > 0)
              again--;
            nr_serial++;
@@ -262,7 +263,7 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
             req_total_buffer = MAX(req_args_buffer + SIZE_OUT_HEADER, req_ret_buffer);
             command_buffer = map_buffer(req_total_buffer);
             cur_args_buffer = command_buffer + SIZE_OUT_HEADER;
-            put_args_in_phys_mem(func_number, signature, args, args_size_opt, &cur_args_buffer);
+            buffer_args(func_number, signature, args, args_size_opt, &cur_args_buffer);
             nr_serial = 1;
         }
     }
@@ -276,7 +277,8 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
            signature->has_out_parameters == 0 &&
            !(func_number == glXSwapBuffers_func ||
              func_number == glFlush_func ||
-             func_number == glFinish_func))))
+             func_number == glFinish_func ||
+             func_number == _moveResizeWindow_func))))
     {
       if (debug_gl) log_gl("flush pending opengl calls...\n");
       if(debug_gl && nr_serial > 1) fprintf(stderr, "buffered: %d\n", nr_serial);
@@ -294,62 +296,13 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
 
   } while (again);
 
-#if 0
-//    if (!(func_number == glXSwapBuffers_func || func_number == glFlush_func  || func_number == glFinish_func || (func_number == glReadPixels_func && disable_warning_for_gl_read_pixels)) && enable_gl_buffering)
-//      log_gl("synchronous opengl call : %s.\n", tab_opengl_calls_name[func_number]);
-    if (func_number == glXSwapBuffers_func || func_number == glFinish_func || func_number == glFlush_func)
-    {
-      if (getenv("GET_IMG_FROM_SERVER"))
-      {
-        XWindowAttributes window_attributes_return;
-        XGetWindowAttributes(state->display, state->current_drawable, &window_attributes_return);
-        state->drawable_width = window_attributes_return.width;
-        state->drawable_height = window_attributes_return.height;
+  /* Determine if we should request an update to our window */
+//  if (func_number == glXSwapBuffers_func ||
+//             func_number == glFlush_func ||
+//             func_number == glFinish_func)
+//    fprintf(stderr, "req. update\n");
 
-        char* buf = malloc(4 * state->drawable_width * state->drawable_height);
-        char* bufGL = malloc(4 * state->drawable_width * state->drawable_height);
-        XImage* img = XCreateImage(state->display, 0, 24, ZPixmap, 0, buf, state->drawable_width, state->drawable_height, 8, 0);
-        disable_warning_for_gl_read_pixels = 1;
 
-        int pack_row_length, pack_alignment, pack_skip_rows, pack_skip_pixels;
-        int pack_pbo = state->pixelPackBuffer;
-        glGetIntegerv_no_lock(GL_PACK_ROW_LENGTH, &pack_row_length);
-        glGetIntegerv_no_lock(GL_PACK_ALIGNMENT, &pack_alignment);
-        glGetIntegerv_no_lock(GL_PACK_SKIP_ROWS, &pack_skip_rows);
-        glGetIntegerv_no_lock(GL_PACK_SKIP_PIXELS, &pack_skip_pixels);
-        glPixelStorei_no_lock(GL_PACK_ROW_LENGTH, 0);
-        glPixelStorei_no_lock(GL_PACK_ALIGNMENT, 4);
-        glPixelStorei_no_lock(GL_PACK_SKIP_ROWS, 0);
-        glPixelStorei_no_lock(GL_PACK_SKIP_PIXELS, 0);
-        if (pack_pbo)
-          glBindBufferARB_no_lock(GL_PIXEL_PACK_BUFFER_EXT, 0);
-        glReadPixels_no_lock(0, 0, state->drawable_width, state->drawable_height, GL_BGRA, GL_UNSIGNED_BYTE, bufGL);
-        glPixelStorei_no_lock(GL_PACK_ROW_LENGTH, pack_row_length);
-        glPixelStorei_no_lock(GL_PACK_ALIGNMENT, pack_alignment);
-        glPixelStorei_no_lock(GL_PACK_SKIP_ROWS, pack_skip_rows);
-        glPixelStorei_no_lock(GL_PACK_SKIP_PIXELS, pack_skip_pixels);
-        if (pack_pbo)
-          glBindBufferARB_no_lock(GL_PIXEL_PACK_BUFFER_EXT, pack_pbo);
-        disable_warning_for_gl_read_pixels = 0;
-        for(i=0;i<state->drawable_height;i++)
-        {
-          memcpy(buf + i * 4 * state->drawable_width,
-                bufGL + (state->drawable_height-1-i) * 4 * state->drawable_width,
-                4 * state->drawable_width);
-        }
-        free(bufGL);
-        GC gc = DefaultGC(state->display, DefaultScreen(state->display));
-        XPutImage(state->display, state->current_drawable, gc, img, 0, 0, 0, 0, state->drawable_width, state->drawable_height);
-        XDestroyImage(img);
-      }
-      else
-        call_opengl(_synchronize_func, 0, 0);
-    }
-
-#endif
-
-end_do_opengl_call:
-  (void)0;
 }
 
 static char *do_init(void)
@@ -426,7 +379,7 @@ static char *do_init(void)
     return NULL;
 }
 
-static inline void put_args_in_phys_mem(int func_number, Signature *s, long *args, int *args_size_opt, char **cur_args)
+static inline void buffer_args(int func_number, Signature *s, long *args, int *args_size_opt, char **cur_args)
 {
   int i;
   char *args_buf = *cur_args;
@@ -677,7 +630,8 @@ int decode_ret_buffer(int func_number, Signature *s, long *args, char *buffer, v
 	CASE_OUT_POINTERS:
       {
          len = *(int*)cur_ptr; cur_ptr += sizeof(int);
-	 memcpy((char*)args[i], cur_ptr, len);
+         if(args[i])
+	   memcpy((char*)args[i], cur_ptr, len);
          cur_ptr += len;
          break;
       }

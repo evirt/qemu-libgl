@@ -121,7 +121,7 @@ static const int _serialized_calls_signature[] = { TYPE_NONE, 0, 1, TYPE_ARRAY_C
 
 static const int _changeWindowState_signature[] = {TYPE_NONE, 0, 2, TYPE_INT, TYPE_INT};
 
-static const int _moveResizeWindow_signature[] = {TYPE_NONE, 0, 2, TYPE_INT, TYPE_4INT};
+static const int _moveResizeWindow_signature[] = {TYPE_NONE, 1, 4, TYPE_INT, TYPE_3INT, TYPE_INT, TYPE_OUT_ARRAY_CHAR};
 
 static const int _send_cursor_signature[] = {TYPE_NONE, 0, 7, TYPE_INT, TYPE_INT,
                                                               TYPE_INT, TYPE_INT,
