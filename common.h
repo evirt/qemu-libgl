@@ -15,7 +15,10 @@ extern int limit_fps;
 #define IS_GLX_CALL(x) (x >= glXChooseVisual_func && x <= glXReleaseTexImageARB_func)
 
 #define RET_STRING_SIZE 32768
-#define SIZE_BUFFER_COMMAND 1024*1024
+
+// #define SIZE_BUFFER_COMMAND 1024*1024
+// enlarge the buffer size for mutter.
+#define SIZE_BUFFER_COMMAND 4*1024*1024
 
 #define POINTER_TO_ARG(x)            (long)(void*)(x)
 #define CHAR_TO_ARG(x)               (long)(x)

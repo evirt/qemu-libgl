@@ -905,6 +905,24 @@ void glXSwapBuffers_no_lock( Display *dpy, GLXDrawable drawable )
   }
   _send_cursor(dpy, drawable);
 
+  // copy image data from host to drawable.
+  {
+    XWindowAttributes watt;
+    XGetWindowAttributes(dpy, drawable, &watt);
+    int drawable_width = watt.width;
+    int drawable_height = watt.height;
+
+    char* buf = malloc(4 * drawable_width * drawable_height);
+    long my_args[] = { INT_TO_ARG(args[1]), POINTER_TO_ARG(buf) };
+    int my_args_size[] = {0, 4 * drawable_width * drawable_height};
+    do_opengl_call_no_lock(_get_imagedata_func, NULL, CHECK_ARGS(my_args, my_args_size));
+
+    XImage* img = XCreateImage(dpy, 0, 24, ZPixmap, 0, buf, drawable_width, drawable_height, 8, 0);
+    GC gc = DefaultGC(dpy, DefaultScreen(dpy));
+    XPutImage(dpy, drawable, gc, img, 0, 0, 0, 0, drawable_width, drawable_height);
+    XDestroyImage(img);
+  }
+
   if (limit_fps > 0)
   {
     if (state->last_swap_buffer_time.tv_sec != 0)
