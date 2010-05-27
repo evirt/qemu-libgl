@@ -613,19 +613,19 @@ static void _update_renderer(Display *dpy, Window win)
   GET_CURRENT_STATE();
   WindowInfoStruct info;
   WindowInfoStruct *old_info = &state->last_win_state;
-  int ck, i;
+  int hack = 0;
 
   if(!win)
     return;
 
   _get_window_info(dpy, win, &info);
 
-ck = 0 ;
-if(state->renderer_data)
-  for(i = 0 ; i < sizeof(*state->renderer_data) ; i++)
-    ck += ((char*)state->renderer_data)[i];
+//ck = 0 ;
+//if(state->renderer_data)
+//  for(i = 0 ; i < sizeof(*state->renderer_data) ; i++)
+//    ck += ((char*)state->renderer_data)[i];
 
-fprintf(stderr, "win: %08x  ck: %08x\n", win, ck);
+//fprintf(stderr, "win: %08x  ck: %08x\n", win, ck);
 
   if(info.map_state != IsViewable) {
     fprintf(stderr, "unmapped!\n");
@@ -635,12 +635,14 @@ fprintf(stderr, "win: %08x  ck: %08x\n", win, ck);
     goto out;
   }
 
-  if(!state->renderer_data)
+  if(!state->renderer_data) {
     state->renderer_data = renderer_create_image(dpy, info.width, info.height);
+    hack = 1;
+  }
   if(!state->renderer_data)
     fprintf(stderr, "Fucked up!\n");
 
-  if ((info.width != old_info->width) || (info.height != old_info->height)) {
+  if ((info.width != old_info->width) || (info.height != old_info->height) || hack) {
 
     if(state->renderer_data)
       renderer_destroy_image(dpy, state->renderer_data);
