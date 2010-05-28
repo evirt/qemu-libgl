@@ -577,6 +577,8 @@ static RendererData *renderer_create_image(Display *dpy, int w, int h)
   fprintf(stderr, "Attach: %d\n", &rdata->shminfo);
   XSync(dpy, 0);
 
+  memset(rdata->buffer, 0, rdata->image->bytes_per_line * h);
+
   if(!rdata)
     fprintf(stderr, "Failed creating image\n");
   return rdata;
@@ -607,59 +609,52 @@ static void renderer_destroy_image(Display *dpy, RendererData *rdata) {
 
 #define MAX_PBUFFERS 100
 
-/* Doit être appelé avec le lock */
-static void _update_renderer(Display *dpy, Window win)
+/* Do this only with lock held */
+static inline void _request_host_resize(Display *dpy, Window win, GLState *state, int w, int h)
 {
+    if(state->renderer_data)
+      renderer_destroy_image(dpy, state->renderer_data);
+
+    state->renderer_data = renderer_create_image(dpy, w, h);
+
+    long args[] = { INT_TO_ARG(win), INT_TO_ARG(w), INT_TO_ARG(h)};
+    do_opengl_call_no_lock(_resize_surface_func, NULL, args, 0);
+}
+
+static void _update_renderer(Display *dpy, Window win) {
   GET_CURRENT_STATE();
   WindowInfoStruct info;
   WindowInfoStruct *old_info = &state->last_win_state;
-  int hack = 0;
 
   if(!win)
     return;
 
   _get_window_info(dpy, win, &info);
 
-//ck = 0 ;
-//if(state->renderer_data)
-//  for(i = 0 ; i < sizeof(*state->renderer_data) ; i++)
-//    ck += ((char*)state->renderer_data)[i];
-
-//fprintf(stderr, "win: %08x  ck: %08x\n", win, ck);
-
   if(info.map_state != IsViewable) {
     fprintf(stderr, "unmapped!\n");
-//    if(state->renderer_data);
-//      renderer_destroy_image(dpy, state->renderer_data);
+    if(state->renderer_data);
+      renderer_destroy_image(dpy, state->renderer_data);
     state->renderer_data = NULL;
     goto out;
   }
 
   if(!state->renderer_data) {
     state->renderer_data = renderer_create_image(dpy, info.width, info.height);
-    hack = 1;
-  }
-  if(!state->renderer_data)
-    fprintf(stderr, "Fucked up!\n");
-
-  if ((info.width != old_info->width) || (info.height != old_info->height) || hack) {
-
-    if(state->renderer_data)
-      renderer_destroy_image(dpy, state->renderer_data);
-
-    state->renderer_data = renderer_create_image(dpy, info.width, info.height);
-
-    long args[] = { INT_TO_ARG(win), POINTER_TO_ARG(&info), INT_TO_ARG(0), POINTER_TO_ARG(0)};
-    int args_size[] = {0, 0, 0, 0};
-    do_opengl_call_no_lock(_moveResizeWindow_func, NULL, args, args_size);
-
+    _request_host_resize(dpy, win, state, info.width, info.height);
     goto out;
   }
 
+  if ((info.width != old_info->width) || (info.height != old_info->height)) {
+    _request_host_resize(dpy, win, state, info.width, info.height);
+    goto out;
+  }
+
+// Actually render stuff
 //  fprintf(stderr, "stride: %d\n", state->renderer_data->image->bytes_per_line);
-  long args[] = { INT_TO_ARG(win), POINTER_TO_ARG(&info), INT_TO_ARG(state->renderer_data->image->bytes_per_line), POINTER_TO_ARG(state->renderer_data->buffer)};
-  int args_size[] = {0, 0, 0, state->renderer_data->image->bytes_per_line*state->renderer_data->h};
-  do_opengl_call_no_lock(_moveResizeWindow_func, NULL, args, args_size);
+  long args[] = { INT_TO_ARG(win), INT_TO_ARG(state->renderer_data->image->bytes_per_line), POINTER_TO_ARG(state->renderer_data->buffer)};
+  int args_size[] = {0, 0, state->renderer_data->image->bytes_per_line*state->renderer_data->h};
+  do_opengl_call_no_lock(_render_surface_func, NULL, args, args_size);
 
   /* draw into window */
   XShmPutImage(dpy, win, DefaultGC(dpy, 0), state->renderer_data->image,

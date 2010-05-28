@@ -278,7 +278,8 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
            !(func_number == glXSwapBuffers_func ||
              func_number == glFlush_func ||
              func_number == glFinish_func ||
-             func_number == _moveResizeWindow_func))))
+             func_number == _resize_surface_func ||
+             func_number == _render_surface_func))))
     {
       if (debug_gl) log_gl("flush pending opengl calls...\n");
       if(debug_gl && nr_serial > 1) fprintf(stderr, "buffered: %d\n", nr_serial);
