@@ -633,8 +633,8 @@ static void _update_renderer(Display *dpy, Window win) {
 
   if(info.map_state != IsViewable) {
     fprintf(stderr, "unmapped!\n");
-    if(state->renderer_data);
-      renderer_destroy_image(dpy, state->renderer_data);
+//    if(state->renderer_data);
+//      renderer_destroy_image(dpy, state->renderer_data);
     state->renderer_data = NULL;
     goto out;
   }
@@ -3448,7 +3448,7 @@ __GLXextFuncPtr glXGetProcAddress_no_lock(const GLubyte * _name)
       goto end_of_glx_get_proc_address;
     }
   }
-  if(debug_gl) log_gl("looking for \"%s\",\n", name);
+  if(1/*debug_gl*/) log_gl("looking for \"%s\",\n", name);
   int ret_call = 0;
   long args[] = { INT_TO_ARG(name) };
   do_opengl_call_no_lock(glXGetProcAddress_fake_func, &ret_call, args, NULL);
