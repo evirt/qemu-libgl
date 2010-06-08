@@ -551,6 +551,10 @@ static RendererData *renderer_create_image(Display *dpy, int w, int h)
 
   rdata->w = w;
   rdata->h = h;
+//  rdata->buffer = calloc(1, (w+3) * 4 * h);
+//  rdata->image = XCreateImage(dpy, DefaultVisual(dpy, 0), 24, ZPixmap, 0, rdata->buffer, w, h, 32, 0);
+
+//  return rdata;
 
   rdata->image = XShmCreateImage(dpy, DefaultVisual(dpy, 0), 24, ZPixmap, NULL,
                                  &rdata->shminfo, w, h);
@@ -633,8 +637,8 @@ static void _update_renderer(Display *dpy, Window win) {
 
   if(info.map_state != IsViewable) {
     fprintf(stderr, "unmapped!\n");
-//    if(state->renderer_data);
-//      renderer_destroy_image(dpy, state->renderer_data);
+    if(state->renderer_data);
+      renderer_destroy_image(dpy, state->renderer_data);
     state->renderer_data = NULL;
     goto out;
   }
@@ -650,18 +654,33 @@ static void _update_renderer(Display *dpy, Window win) {
     goto out;
   }
 
+  //fprintf(stderr, "render: win: %08x w: %d h: %d stride: %d\n", win, state->renderer_data->w, state->renderer_data->h, state->renderer_data->image->bytes_per_line);
+
 // Actually render stuff
-//  fprintf(stderr, "stride: %d\n", state->renderer_data->image->bytes_per_line);
-  long args[] = { INT_TO_ARG(win), INT_TO_ARG(state->renderer_data->image->bytes_per_line), POINTER_TO_ARG(state->renderer_data->buffer)};
-  int args_size[] = {0, 0, state->renderer_data->image->bytes_per_line*state->renderer_data->h};
+  long args[] = { INT_TO_ARG(win), INT_TO_ARG(state->renderer_data->image->bits_per_pixel), INT_TO_ARG(state->renderer_data->image->bytes_per_line), POINTER_TO_ARG(state->renderer_data->buffer)};
+  int args_size[] = {0, 0, 0, state->renderer_data->image->bytes_per_line*state->renderer_data->h};
   do_opengl_call_no_lock(_render_surface_func, NULL, args, args_size);
 
   /* draw into window */
   XShmPutImage(dpy, win, DefaultGC(dpy, 0), state->renderer_data->image,
                0, 0, 0, 0, state->renderer_data->w, state->renderer_data->h,
                False);
+  
+//  XPutImage(dpy, win, DefaultGC(dpy, 0), state->renderer_data->image, 0, 0, 0, 0, state->renderer_data->w, state->renderer_data->h);
 
   XFlush(dpy);
+
+#if 0
+  do {
+    char filename[50];
+    FILE *f;
+
+    sprintf(filename, "/home/ian/dump_%08x.rgb", win);
+    f = fopen(filename, "wb");
+    fwrite(state->renderer_data->buffer, state->renderer_data->image->bytes_per_line*state->renderer_data->h, 1, f);
+    fclose(f);
+  } while(0);
+#endif
 
 out:
   memcpy(old_info, &info, sizeof(info));
