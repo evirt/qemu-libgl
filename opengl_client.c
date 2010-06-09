@@ -86,7 +86,7 @@ static const char* interestingEnvVars[] =
   "DEBUG_ARRAY_PTR",         /* default : not set */
   "DISABLE_OPTIM",           /* default : not set */
   "LIMIT_FPS",               /* default : not set */ /* unsupported for Win32 guest */
-  "ENABLE_GL_BUFFERING",     /* default : set if ??? detected */
+  "DISABLE_GL_BUFFERING",     /* default : set if ??? detected */
 };
 
 /**/
@@ -374,7 +374,7 @@ static char *do_init(void)
       log_gl("exiting !\n");
       exit(-1);
     }
-    enable_gl_buffering = (init_ret == 2) && (getenv("ENABLE_GL_BUFFERING") != NULL);
+    enable_gl_buffering = (init_ret == 2) && !(getenv("DISABLE_GL_BUFFERING"));
     fprintf(stderr, "Enable buffering: %s (%d)\n", enable_gl_buffering?"yes":"no", init_ret);
 
     return NULL;
