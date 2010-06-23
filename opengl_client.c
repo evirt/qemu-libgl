@@ -148,7 +148,6 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
   }
 
   Signature* signature = (Signature*)tab_opengl_calls[func_number];
-  int args_size[100];
   int ret_int = 0;
   int again, req_args_buffer, req_ret_buffer, req_total_buffer;
   static int init = 0;
@@ -252,8 +251,6 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
             nr_serial = 1;
         }
     }
-
-    if (debug_gl) display_gl_call(get_err_file(), func_number, args, args_size);
 
     /* If call is not bufferable or the buffer is full. */
     if (nr_serial &&

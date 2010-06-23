@@ -507,7 +507,7 @@ static RendererData *renderer_create_image(Display *dpy, int w, int h)
   }
 
   rdata->shminfo.shmaddr = shmat(rdata->shminfo.shmid, NULL,0);
-  if(rdata->shminfo.shmaddr == -1)
+  if(rdata->shminfo.shmaddr == (void*)-1)
     goto out_shmput;
 
   rdata->buffer = rdata->shminfo.shmaddr;
@@ -516,7 +516,6 @@ static RendererData *renderer_create_image(Display *dpy, int w, int h)
   rdata->shminfo.readOnly = False;
 
   XShmAttach(dpy, &rdata->shminfo);
-  fprintf(stderr, "Attach: %d\n", &rdata->shminfo);
   XSync(dpy, 0);
 
   memset(rdata->buffer, 0, rdata->image->bytes_per_line * h);
@@ -537,16 +536,13 @@ out:
 
 static void renderer_destroy_image(Display *dpy, RendererData *rdata) {
   if(!rdata) {
-    fprintf(stderr, "Nothing to destroy!!!!!\n"); // FIXMEIM BUG!
     return;
   }
-  fprintf(stderr, "Detach: %d\n", &rdata->shminfo);
   XShmDetach(dpy, &rdata->shminfo);
   rdata->image->data = NULL;
   XDestroyImage(rdata->image);
   shmdt(rdata->shminfo.shmaddr);
   shmctl(rdata->shminfo.shmid, IPC_RMID, NULL);
-  //FIXMEIM - destroy image!!!
   free(rdata);
 }
 
@@ -841,7 +837,6 @@ end_of_glx_get_config:
 void glXSwapBuffers_no_lock( Display *dpy, GLXDrawable drawable )
 {
   //log_gl("glXSwapBuffers %d\n", drawable);
-  GET_CURRENT_STATE();
   long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(drawable) };
   do_opengl_call_no_lock(glXSwapBuffers_func, NULL, args, NULL);
 

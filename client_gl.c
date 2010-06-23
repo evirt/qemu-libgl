@@ -3755,47 +3755,6 @@ static void _glArraySend(GLState* state, const char* func_name, int func, Client
   int size = (last - first + 1) * getMulFactorFromPointerArray(array);
   if (size == 0) return;
 
-#if 0
-  unsigned int crc = calc_checksum(array->ptr + offset, size, 0xFFFFFFFF);
-  crc = calc_checksum(&offset, sizeof(int), crc);
-  crc = calc_checksum(&size, sizeof(int), crc);
-  crc = calc_checksum(&array->size, sizeof(int), crc);
-  crc = calc_checksum(&array->type, sizeof(int), crc);
-
-  if (crc == 0)
-  {
-    /*int i;
-    unsigned char* ptr = (unsigned char*)(array->ptr + offset);
-    for(i=0;i<size;i++)
-    {
-      log_gl("%d ", (int)ptr[i]);
-    }*/
-    log_gl("strange : crc = 0\n");
-  }
-
-  if (crc == array->last_crc)
-  {
-    if (debug_array_ptr)
-    {
-      log_gl("%s : same crc. Saving %d bytes\n", func_name, size);
-    }
-    return;
-  }
-
-  array->last_crc = crc;
-#endif
-
-  if (debug_array_ptr)
-  {
-    unsigned int crc = calc_checksum(array->ptr + offset, size, 0xFFFFFFFF);
-    crc = calc_checksum(&offset, sizeof(int), crc);
-    crc = calc_checksum(&size, sizeof(int), crc);
-    crc = calc_checksum(&array->size, sizeof(int), crc);
-    crc = calc_checksum(&array->type, sizeof(int), crc);
-
-    log_gl("%s sending %d bytes from %d : crc = %d\n", func_name, size, offset, crc);
-  }
-
   int currentArrayBuffer = state->arrayBuffer;
   if (currentArrayBuffer)
   {
