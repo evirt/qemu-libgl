@@ -14,9 +14,8 @@
 extern int debug_gl;
 extern int debug_array_ptr;
 extern int disable_optim;
-extern int limit_fps;
 
-#define IS_GLX_CALL(x) (x >= glXChooseVisual_func && x <= glXReleaseTexImageARB_func)
+#define IS_GLX_CALL(x) (x >= glXChooseVisual_func && x <= glXSwapIntervalSGI_func)
 
 #define RET_STRING_SIZE 32768
 #define SIZE_BUFFER_COMMAND 1024*800*4
