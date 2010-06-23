@@ -77,11 +77,9 @@ static inline void buffer_args(int func_number, Signature *s, long *args, int *a
 
 static const char* interestingEnvVars[] =
 {
-  "GET_IMG_FROM_SERVER",     /* default : not set */ /* unsupported for Win32 guest */
   "GL_SERVER",               /* default is localhost */
   "GL_SERVER_PORT",          /* default is 5555 */
   "GL_ERR_FILE",             /* default is stderr */
-  "HACK_XGL",                /* default : not set */ /* unsupported for Win32 guest */
   "DEBUG_GL",                /* default : not set */
   "DEBUG_ARRAY_PTR",         /* default : not set */
   "DISABLE_OPTIM",           /* default : not set */
@@ -200,16 +198,6 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
     glXMakeCurrent_no_lock(state->display, state->current_drawable, state->context);
    }
 #endif
-
-  if (func_number == glFlush_func && getenv("HACK_XGL"))
-  {
-    glXSwapBuffers_no_lock(state->display, state->current_drawable);
-    return;
-  }
-  else if ((func_number == glDrawBuffer_func || func_number == glReadBuffer_func) && getenv("HACK_XGL"))
-  {
-    return;
-  }
 
   if ((func_number >= glRasterPos2d_func && func_number <= glRasterPos4sv_func) ||
       (func_number >= glWindowPos2d_func && func_number <= glWindowPos3sv_func) ||
