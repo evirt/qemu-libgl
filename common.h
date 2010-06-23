@@ -9,6 +9,8 @@
 
 #include "mesa_glx.h"
 
+#include "range_alloc.h"
+
 #define ENABLE_THREAD_SAFETY
 
 extern int debug_gl;
