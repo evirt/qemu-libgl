@@ -159,7 +159,6 @@ const char *glXQueryExtensionsString( Display *dpy, int screen )
     long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(screen) };
     do_opengl_call_no_lock(glXQueryExtensionsString_func, &ret, args, NULL);
     ret = strdup(ret);
-    removeUnwantedExtensions(ret);
   }
   UNLOCK(glXQueryExtensionsString_func);
   return ret;
@@ -273,10 +272,6 @@ const char *glXQueryServerString( Display *dpy, int screen, int name )
     long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(screen), INT_TO_ARG(name) };
     do_opengl_call_no_lock(glXQueryServerString_func, &glXQueryServerString_ret[name], args, NULL);
     glXQueryServerString_ret[name] = strdup(glXQueryServerString_ret[name]);
-    if (name == GLX_EXTENSIONS)
-    {
-      removeUnwantedExtensions(glXQueryServerString_ret[name]);
-    }
   }
   UNLOCK(glXQueryServerString_func);
   return glXQueryServerString_ret[name];
@@ -297,10 +292,6 @@ const char *glXGetClientString( Display *dpy, int name )
     }
     else
       glXGetClientString_ret[name] = strdup(glXGetClientString_ret[name]);
-    if (name == GLX_EXTENSIONS)
-    {
-      removeUnwantedExtensions(glXGetClientString_ret[name]);
-    }
   }
   UNLOCK(glXGetClientString_func);
   return glXGetClientString_ret[name];

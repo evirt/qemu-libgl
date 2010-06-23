@@ -1742,10 +1742,6 @@ GLAPI const GLubyte * APIENTRY glGetString( GLenum name )
 
     if(debug_gl) log_gl("glGetString(0x%X) = %s\n", name, glStrings[i]);
     glStrings[name - GL_VENDOR] = (GLubyte*)strdup((char *)glStrings[i]);
-    if (name == GL_EXTENSIONS)
-    {
-      removeUnwantedExtensions((char *)glStrings[i]);
-    }
   }
   UNLOCK(glGetString_func);
   return glStrings[i];

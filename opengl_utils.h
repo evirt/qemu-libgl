@@ -41,7 +41,6 @@ extern unsigned int alloc_range(RangeAllocator* range, int n, unsigned int* valu
 extern void delete_value(RangeAllocator* range, unsigned int value);
 extern void delete_range(RangeAllocator* range, int n, const unsigned int* values);
 extern void delete_consecutive_values(RangeAllocator* range, unsigned int first, int n);
-extern void removeUnwantedExtensions(char* ret);
 
 extern int compute_arg_length(int func_number, Signature *s, int arg_i, long* args);
 
