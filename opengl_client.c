@@ -77,8 +77,6 @@ static inline void buffer_args(int func_number, Signature *s, long *args, int *a
 
 static const char* interestingEnvVars[] =
 {
-  "GL_SERVER",               /* default is localhost */
-  "GL_SERVER_PORT",          /* default is 5555 */
   "GL_ERR_FILE",             /* default is stderr */
   "DEBUG_GL",                /* default : not set */
   "DEBUG_ARRAY_PTR",         /* default : not set */
@@ -92,7 +90,6 @@ static const char* interestingEnvVars[] =
 int debug_gl = 0;
 int debug_array_ptr = 0;
 int disable_optim = 0;
-int limit_fps = 0;
 
 //static char *glbuffer;
 static int glfd;
@@ -348,7 +345,6 @@ static char *do_init(void)
     debug_gl = getenv("DEBUG_GL") != NULL;
     debug_array_ptr = getenv("DEBUG_ARRAY_PTR") != NULL;
     disable_optim = getenv("DISABLE_OPTIM") != NULL;
-    limit_fps = getenv("LIMIT_FPS") ? atoi(getenv("LIMIT_FPS")) : 0;
 
     command_buffer = map_buffer(SIZE_BUFFER_COMMAND);
 

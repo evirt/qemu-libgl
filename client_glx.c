@@ -377,7 +377,7 @@ GLXContext glXCreateContext( Display *dpy, XVisualInfo *vis,
     _create_context(ctxt, shareList);
     glstates[nbGLStates-1]->isAssociatedToFBConfigVisual = isFbConfigVisual;
   }
-end_of_create_context:
+
   UNLOCK(glXCreateContext_func);
   return ctxt;
 }
@@ -846,21 +846,6 @@ void glXSwapBuffers_no_lock( Display *dpy, GLXDrawable drawable )
   do_opengl_call_no_lock(glXSwapBuffers_func, NULL, args, NULL);
 
   _update_renderer(dpy, drawable);
-
-  if (limit_fps > 0)
-  {
-    if (state->last_swap_buffer_time.tv_sec != 0)
-    {
-      struct timeval current_time;
-      gettimeofday(&current_time, NULL);
-      int diff_time = (current_time.tv_sec - state->last_swap_buffer_time.tv_sec) * 1000 + (current_time.tv_usec - state->last_swap_buffer_time.tv_usec) / 1000;
-      if (diff_time < 1000 / limit_fps)
-      {
-        usleep( (1000 / limit_fps - diff_time) * 900);
-      }
-    }
-    gettimeofday(&state->last_swap_buffer_time, NULL);
-  }
 }
 
 GLAPI void APIENTRY glXSwapBuffers( Display *dpy, GLXDrawable drawable )
