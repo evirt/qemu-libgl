@@ -19,13 +19,13 @@ libGL.so.1.2: client_stub.c opengl_client.c glgetv_cst.h opengl_func.h opengl_ut
 opengl_func.h: gl_func.h
 
 gl_func.h: parse_gl_h mesa_gl.h mesa_glext.h gl_func_perso.h
-	./parse_gl_h
+	./parse_gl_h 2> /dev/null
 gl_func_tabs.h: parse_gl_h mesa_gl.h mesa_glext.h gl_func_perso.h
-	./parse_gl_h
+	./parse_gl_h 2> /dev/null
 client_stub.c: parse_gl_h mesa_gl.h mesa_glext.h gl_func_perso.h
-	./parse_gl_h
+	./parse_gl_h 2> /dev/null
 glgetv_cst.h: parse_mesa_get_c mesa_get.c mesa_gl.h mesa_glext.h
-	./parse_mesa_get_c
+	./parse_mesa_get_c 2> /dev/null
 parse_gl_h: parse_gl_h.c
 	$(BUILD_CC) -g -o $@ $<
 parse_mesa_get_c: parse_mesa_get_c.c mesa_gl.h mesa_glext.h

@@ -571,7 +571,6 @@ static void _update_renderer(Display *dpy, Window win) {
   _get_window_info(dpy, win, &info);
 
   if(info.map_state != IsViewable) {
-    fprintf(stderr, "unmapped!\n");
     if(state->renderer_data);
       renderer_destroy_image(dpy, state->renderer_data);
     state->renderer_data = NULL;

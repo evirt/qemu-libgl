@@ -120,7 +120,6 @@ static int last_cb_size;
 char *map_buffer(int buffer_size) {
     if(last_cb)
 	munmap(last_cb, last_cb_size);
-    fprintf(stderr, "mapping buffer: %d\n", buffer_size);
 
     char *buffer = mmap(NULL, buffer_size, PROT_READ | PROT_WRITE, MAP_SHARED, glfd, 0);
 
@@ -356,7 +355,8 @@ static char *do_init(void)
       exit(-1);
     }
     enable_gl_buffering = (init_ret == 2) && !(getenv("DISABLE_GL_BUFFERING"));
-    fprintf(stderr, "Enable buffering: %s (%d)\n", enable_gl_buffering?"yes":"no", init_ret);
+    if(debug_gl)
+      fprintf(stderr, "Enable buffering: %s (%d)\n", enable_gl_buffering?"yes":"no", init_ret);
 
     return NULL;
 }
