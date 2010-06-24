@@ -715,8 +715,8 @@ void CONCAT(funcName,_no_lock)( GLenum pname, cType *params ) \
       args_size[1] = tab_args_type_length[typeBase] * get_size_get_boolean_integer_float_double_v(funcNumber, pname); \
       if(debug_gl) log_gl("getting value 0x%X\n", pname); \
       do_opengl_call_no_lock(funcNumber, NULL, CHECK_ARGS(args, args_size)); \
-      if (typeBase == TYPE_INT) log_gl("val=%d\n", (int)*params); \
-      else if (typeBase == TYPE_FLOAT) log_gl("val=%f\n", (float)*params); \
+      if (debug_gl && typeBase == TYPE_INT) log_gl("val=%d\n", (int)*params); \
+      else if (debug_gl && typeBase == TYPE_FLOAT) log_gl("val=%f\n", (float)*params); \
     } \
   } \
 } \
