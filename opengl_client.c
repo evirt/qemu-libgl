@@ -152,7 +152,7 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
   static int init = 0;
 
   int current_thread = pthread_self();
-  static int nr_serial;
+  static int nr_serial, cur_ret_buf;
 
 //  fprintf(stderr, "call_to_buffer: %d\n", func_number);
   if (!init) {
@@ -230,9 +230,11 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
 
     /* Check buffer sizes */
     req_args_buffer = get_args_buffer_size(func_number, signature, args, args_size_opt);
+    // Only the last command can return stuff so no need to increment the size of the required return buffer.
     req_ret_buffer = get_ret_buffer_size(func_number, signature, args, args_size_opt);
     if(((SIZE_BUFFER_COMMAND + command_buffer - cur_args_buffer) >= req_args_buffer) && req_ret_buffer <= SIZE_BUFFER_COMMAND)
     {   
+           cur_ret_buf = req_ret_buffer;
            buffer_args(func_number, signature, args, args_size_opt, &cur_args_buffer);
            if(again > 0)
              again--;
@@ -242,10 +244,11 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
        again++;
 
         if(again == 2) {
-            fprintf(stderr, "OpenGL call too large for buffering. ------- \n");
+            if(debug_gl) fprintf(stderr, "OpenGL call too large for buffering.\n");
             req_total_buffer = MAX(req_args_buffer + SIZE_OUT_HEADER, req_ret_buffer);
             command_buffer = map_buffer(req_total_buffer);
             cur_args_buffer = command_buffer + SIZE_OUT_HEADER;
+            cur_ret_buf = req_ret_buffer;
             buffer_args(func_number, signature, args, args_size_opt, &cur_args_buffer);
             nr_serial = 1;
         }
@@ -265,7 +268,7 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
       if (debug_gl) log_gl("flush pending opengl calls...\n");
       if(debug_gl && nr_serial > 1) fprintf(stderr, "buffered: %d\n", nr_serial);
   
-      ret_int = call_opengl(cur_args_buffer - command_buffer, req_ret_buffer);
+      ret_int = call_opengl(cur_args_buffer - command_buffer, cur_ret_buf);
       decode_ret_buffer(func_number, signature, args, command_buffer, ret_ptr);
 
       cur_args_buffer = NULL; // Reset pointers.
@@ -277,13 +280,6 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
     }
 
   } while (again);
-
-  /* Determine if we should request an update to our window */
-//  if (func_number == glXSwapBuffers_func ||
-//             func_number == glFlush_func ||
-//             func_number == glFinish_func)
-//    fprintf(stderr, "req. update\n");
-
 
 }
 

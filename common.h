@@ -20,7 +20,7 @@ extern int disable_optim;
 #define IS_GLX_CALL(x) (x >= glXChooseVisual_func && x <= glXSwapIntervalSGI_func)
 
 #define RET_STRING_SIZE 32768
-#define SIZE_BUFFER_COMMAND 1024*800*4
+#define SIZE_BUFFER_COMMAND 1024*64
 
 #define POINTER_TO_ARG(x)            (long)(void*)(x)
 #define CHAR_TO_ARG(x)               (long)(x)
