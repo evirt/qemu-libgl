@@ -480,16 +480,12 @@ static RendererData *renderer_create_image(Display *dpy, int w, int h)
 
   rdata->w = w;
   rdata->h = h;
-//  rdata->buffer = calloc(1, (w+3) * 4 * h);
-//  rdata->image = XCreateImage(dpy, DefaultVisual(dpy, 0), 24, ZPixmap, 0, rdata->buffer, w, h, 32, 0);
-
-//  return rdata;
 
   rdata->image = XShmCreateImage(dpy, DefaultVisual(dpy, 0), 24, ZPixmap, NULL,
                                  &rdata->shminfo, w, h);
   
   if(!rdata->image)
-    goto out_free_rdata;
+    goto out_try_non_shm;
 
   rdata->shminfo.shmid = shmget(IPC_PRIVATE, rdata->image->bytes_per_line * h,
                                 IPC_CREAT | 0777);
@@ -503,23 +499,31 @@ static RendererData *renderer_create_image(Display *dpy, int w, int h)
 
   rdata->buffer = rdata->shminfo.shmaddr;
   rdata->image->data = rdata->buffer;
-
   rdata->shminfo.readOnly = False;
+  rdata->use_shm = 1;
 
   XShmAttach(dpy, &rdata->shminfo);
   XSync(dpy, 0);
 
   memset(rdata->buffer, 0, rdata->image->bytes_per_line * h);
 
-  if(!rdata)
-    fprintf(stderr, "Failed creating image\n");
   return rdata;
 
 out_shmput:
   shmctl(rdata->shminfo.shmid, IPC_RMID, NULL);
 out_destroy_img:
   XDestroyImage(rdata->image);
-out_free_rdata:
+out_try_non_shm:
+  // Fallback path
+  rdata->image = XCreateImage(dpy, DefaultVisual(dpy, 0), 24, ZPixmap, 0, NULL, w, h, 32, 0);
+  if(rdata->image) {
+    rdata->buffer = calloc(1, (rdata->image->bytes_per_line) * h);
+    if(rdata->buffer) {
+      rdata->image->data = rdata->buffer;
+      return rdata;
+    }
+  }
+  XDestroyImage(rdata->image);
   free(rdata);
 out:
   return NULL;
@@ -529,11 +533,18 @@ static void renderer_destroy_image(Display *dpy, RendererData *rdata) {
   if(!rdata) {
     return;
   }
-  XShmDetach(dpy, &rdata->shminfo);
+  if(rdata->use_shm)
+    XShmDetach(dpy, &rdata->shminfo);
+  else
+    free(rdata->image->data);
+
   rdata->image->data = NULL;
   XDestroyImage(rdata->image);
-  shmdt(rdata->shminfo.shmaddr);
-  shmctl(rdata->shminfo.shmid, IPC_RMID, NULL);
+
+  if(rdata->use_shm) {
+    shmdt(rdata->shminfo.shmaddr);
+    shmctl(rdata->shminfo.shmid, IPC_RMID, NULL);
+  }
   free(rdata);
 }
 
@@ -587,11 +598,13 @@ static void _update_renderer(Display *dpy, Window win) {
   do_opengl_call_no_lock(_render_surface_func, NULL, args, args_size);
 
   /* draw into window */
-  XShmPutImage(dpy, win, DefaultGC(dpy, 0), state->renderer_data->image,
-               0, 0, 0, 0, state->renderer_data->w, state->renderer_data->h,
-               False);
-  
-//  XPutImage(dpy, win, DefaultGC(dpy, 0), state->renderer_data->image, 0, 0, 0, 0, state->renderer_data->w, state->renderer_data->h);
+  if(state->renderer_data->use_shm)
+    XShmPutImage(dpy, win, DefaultGC(dpy, 0), state->renderer_data->image,
+                 0, 0, 0, 0, state->renderer_data->w, state->renderer_data->h,
+                 False);
+  else 
+    XPutImage(dpy, win, DefaultGC(dpy, 0), state->renderer_data->image, 0, 0,
+              0, 0, state->renderer_data->w, state->renderer_data->h);
 
   XFlush(dpy);
 

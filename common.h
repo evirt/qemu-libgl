@@ -266,9 +266,10 @@ typedef struct
 {
   XImage *image;
   XShmSegmentInfo shminfo;
+  char *buffer;
   int w;
   int h;
-  char *buffer;
+  int use_shm;
 } RendererData;
 
 
