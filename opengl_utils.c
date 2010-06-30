@@ -1,6 +1,7 @@
 /*
  *  Copyright (c) 2007 Even Rouault
- *  Modified by Ian Molton 2010
+ *  Copyright (c) 2010 Intel
+ *  Modified by Ian Molton 2010 <ian.molton@collabora.co.uk>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal

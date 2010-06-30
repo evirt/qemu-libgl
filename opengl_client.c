@@ -2,6 +2,8 @@
  *  Guest-side implementation of GL/GLX API. Replacement of standard libGL.so
  *
  *  Copyright (c) 2006,2007 Even Rouault
+ *  Copyright (c) 2010 Intel
+ *    Parts written by Ian Molton <ian.molton@collabora.co.uk>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,18 +23,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-/* gcc -Wall -g -O2 opengl_client.c -shared -o libGL.so.1 */
-
-/* Windows compilations instructions */
-/* After building qemu, cd to target-i386 */
-/* i586-mingw32msvc-gcc -O2 -Wall opengl_client.c -c -I../i386-softmmu -I. -DBUILD_GL32 */
-/* i586-mingw32msvc-dllwrap -o opengl32.dll --def opengl32.def -Wl,-enable-stdcall-fixup opengl_client.o -lws2_32
-  */
-
-
-/* objdump -T ../i386-softmmu/libGL.so | grep Base | awk '{print $7}' | grep gl | sort > opengl32_temp.def */
-
 
 #define _GNU_SOURCE
 #define _XOPEN_SOURCE 600
@@ -327,7 +317,7 @@ static char *do_init(void)
 
     last_current_thread = current_thread;
 
-    glfd = open("/dev/vimem", O_RDWR | O_NOCTTY | O_SYNC | O_CLOEXEC);
+    glfd = open("/dev/glmem", O_RDWR | O_NOCTTY | O_SYNC | O_CLOEXEC);
 
     if(glfd == -1) {
         fprintf(stderr, "Failed to open device\n");

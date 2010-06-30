@@ -1,7 +1,7 @@
 /*
  *  Functions used by host & client sides
  *
- *  Copyright (c) 2010 Ian Molton
+ *  Copyright (c) 2010 Intel
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
