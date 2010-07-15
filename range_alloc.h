@@ -1,7 +1,5 @@
 /*
- *  Functions used by host & client sides
- *
- *  Copyright (c) 2010 Intel
+ *  Copyright (c) 2007 Even Rouault
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal

@@ -1,7 +1,7 @@
 /*
- *  Guest-side implementation of GL/GLX API. Replacement of standard libGL.so
+ *  Hand-implemented GL/GLX API
  *
- *  Copyright (c) 2010 Intel
+ *  Copyright (c) 2006,2007 Even Rouault
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
