@@ -398,7 +398,7 @@ static char *do_init(void)
 
     last_current_thread = current_thread;
 
-    glfd = open("/dev/vimem", O_RDWR | O_NOCTTY | O_SYNC | O_CLOEXEC);
+    glfd = open("/dev/glmem", O_RDWR | O_NOCTTY | O_SYNC | O_CLOEXEC);
 
     if(glfd == -1) {
         fprintf(stderr, "Failed to open device\n");
