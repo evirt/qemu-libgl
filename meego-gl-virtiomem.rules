@@ -1,0 +1,2 @@
+SUBSYSTEM=="virtio_gl", ACTION=="add", MODE="0660", GROUP="video" \
+    RUN+="/bin/ln -sf /usr/lib/libGL.so.1.2-qemu-gl-addon /usr/lib/libGL.so.1.2"
