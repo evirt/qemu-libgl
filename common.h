@@ -46,6 +46,7 @@ extern int disable_optim;
 
 #define RET_STRING_SIZE 32768
 #define SIZE_BUFFER_COMMAND 1024*64
+#define MAX_GL_BUFFER_SIZE 0
 
 #define POINTER_TO_ARG(x)            (long)(void*)(x)
 #define CHAR_TO_ARG(x)               (long)(x)

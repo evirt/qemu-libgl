@@ -111,6 +111,12 @@ char *map_buffer(int buffer_size) {
     if(last_cb)
 	munmap(last_cb, last_cb_size);
 
+    if(MAX_GL_BUFFER_SIZE && buffer_size > MAX_GL_BUFFER_SIZE) {
+        fprintf(stderr, "OpenGL passthrough: buffer size exceeded.\n");
+        *(int*)0 = 0; // Force segfault
+        exit(1); // just in case
+    }
+
     char *buffer = mmap(NULL, buffer_size, PROT_READ | PROT_WRITE, MAP_SHARED, glfd, 0);
 
     if(buffer == MAP_FAILED) {
