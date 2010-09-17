@@ -44,8 +44,15 @@
 #include "lock.h"
 #include "log.h"
 
+//#define DEBUG_GLIO
+
+#ifdef DEBUG_GLIO
+#define SIZE_OUT_HEADER (4*4)
+#define SIZE_IN_HEADER (4*2)
+#else
 #define SIZE_OUT_HEADER (4*3)
 #define SIZE_IN_HEADER 4
+#endif
 
 /* Locking globals... FIXMEIM find a better place */
 pthread_mutex_t global_mutex         = PTHREAD_MUTEX_INITIALIZER;
@@ -81,26 +88,76 @@ int debug_gl = 0;
 int debug_array_ptr = 0;
 int disable_optim = 0;
 
-//static char *glbuffer;
 static int glfd;
 
-static char* command_buffer = NULL;
+static char* xfer_buffer = NULL;
 
-static inline int call_opengl(int args_len, int ret_len)
+static inline int call_opengl(char *buffer, int args_len, int ret_len, char *ret_buffer)
 {
-	volatile int *i = (volatile int*)command_buffer;
+	volatile int *i = (volatile int*)xfer_buffer;
+	char *ret_buf = ret_buffer?ret_buffer:buffer;
+	int remain;
 
-	/* i[0] = pid; ...is filled in by the kernel module for virtio GL */
+#ifdef DEBUG_GLIO
+int ii, sum = 0;
+for(ii = SIZE_OUT_HEADER; ii < args_len ; ii++)
+sum += buffer[ii];
+#endif
+
+     /* i[0] = pid; ...is filled in by the kernel module for virtio GL */
 	i[1] = args_len;
 	i[2] = ret_len;
+#ifdef DEBUG_GLIO
+		i[3] = sum;
+#endif
 
-	fsync(glfd); // Make magic happen
-
-	if(!i[0]) {
-		/* Kernel decided to kill the process */
-		*(int*)0 = 0;
-		exit(1); /* Just in case */
+	if(buffer == xfer_buffer) {
+		fsync(glfd); // Make magic happen
 	}
+	else {
+	    char *ptr = buffer+SIZE_OUT_HEADER;
+            int len = args_len > SIZE_BUFFER_COMMAND-SIZE_OUT_HEADER?SIZE_BUFFER_COMMAND-SIZE_OUT_HEADER:args_len;
+
+//            fprintf(stderr, "Indirect transfer %d %d\n", args_len, ret_len);
+            while(args_len) {
+//		fprintf(stderr, "remaining: %d %d \n", len, i[1]);
+		memcpy(xfer_buffer + SIZE_OUT_HEADER, ptr, len);
+		fsync(glfd); // Make magic happen
+		args_len -= len;
+		ptr += len;
+                len = args_len > SIZE_BUFFER_COMMAND-SIZE_OUT_HEADER?SIZE_BUFFER_COMMAND-SIZE_OUT_HEADER:args_len;
+		i[1] = len + SIZE_OUT_HEADER;
+		i[2] = 0;
+//		fprintf(stderr, "rep: %d\n", len+SIZE_OUT_HEADER);
+	    }
+
+            ptr = ret_buf;
+            remain = ret_len;
+	    while(remain) {
+		int len = remain > SIZE_BUFFER_COMMAND?SIZE_BUFFER_COMMAND:remain;
+		i[1] = 0;
+		i[2] = len;
+		fsync(glfd); // Make magic happen
+
+		memcpy(ptr, xfer_buffer, len);
+		remain -= len;
+		ptr += len;
+	    }
+	}
+
+	if(!((int*)ret_buf)[0]) {
+                /* Kernel decided to kill the process */
+                *(int*)0 = 0;
+                exit(1); /* Just in case */
+        }
+
+#ifdef DEBUG_GLIO
+sum = 0;
+for(ii = SIZE_IN_HEADER; ii < ret_len ; ii++)
+sum += ret_buf[ii];
+if(sum != *(int*)(ret_buf + 4))
+  fprintf(stderr, "Cksum error %d %d\n", sum, *(int*)(ret_buf + 4));
+#endif
 	
 	return 0;
 }
@@ -108,16 +165,10 @@ static inline int call_opengl(int args_len, int ret_len)
 static void* last_cb;
 static int last_cb_size;
 char *map_buffer(int buffer_size) {
-    if(last_cb)
-	munmap(last_cb, last_cb_size);
+    char *buffer;
+    buffer_size = SIZE_BUFFER_COMMAND;
 
-    if(MAX_GL_BUFFER_SIZE && buffer_size > MAX_GL_BUFFER_SIZE) {
-        fprintf(stderr, "OpenGL passthrough: buffer size exceeded.\n");
-        *(int*)0 = 0; // Force segfault
-        exit(1); // just in case
-    }
-
-    char *buffer = mmap(NULL, buffer_size, PROT_READ | PROT_WRITE, MAP_SHARED, glfd, 0);
+    buffer = mmap(NULL, buffer_size, PROT_READ | PROT_WRITE, MAP_SHARED, glfd, 0);
 
     if(buffer == MAP_FAILED) {
         fprintf(stderr, "Failed to map buffer - dying horribly\n");
@@ -136,6 +187,9 @@ static int enable_gl_buffering = 0;
 /* Must only be called if the global lock has already been taken ! */
 void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* args_size_opt)
 {
+  static char *command_buffer;
+  char *ret_buf = NULL;
+
   if( ! (func_number >= 0 && func_number < GL_N_CALLS) )
   {
     log_gl("func_number >= 0 && func_number < GL_N_CALLS failed\n");
@@ -217,7 +271,7 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
   again = 0;
   do {
     if(!command_buffer)
-        command_buffer = map_buffer(SIZE_BUFFER_COMMAND);
+        command_buffer = xfer_buffer;
 
     if(!cur_args_buffer) {
           cur_args_buffer = command_buffer + SIZE_OUT_HEADER;
@@ -240,10 +294,16 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
        again++;
 
         if(again == 2) {
-            if(debug_gl) fprintf(stderr, "OpenGL call too large for buffering.\n");
-            req_total_buffer = MAX(req_args_buffer + SIZE_OUT_HEADER, req_ret_buffer);
-            command_buffer = map_buffer(req_total_buffer);
+            if(debug_gl) fprintf(stderr, "OpenGL call too large for direct buffering.\n");
+            req_total_buffer = MAX(req_args_buffer + SIZE_OUT_HEADER, req_ret_buffer);  // FIXME - must change when ret buffer is seperated
+
+if(req_total_buffer > 10*1024*1024) {
+	fprintf(stderr, "Attempt to allocate buffer over 10M");
+	*(int*)0 = 0;
+}
+            command_buffer = malloc(req_total_buffer);
             cur_args_buffer = command_buffer + SIZE_OUT_HEADER;
+            ret_buf = malloc(req_ret_buffer);
             cur_ret_buf = req_ret_buffer;
             buffer_args(func_number, signature, args, args_size_opt, &cur_args_buffer);
             nr_serial = 1;
@@ -264,12 +324,14 @@ void do_opengl_call_no_lock(int func_number, void* ret_ptr, long* args, int* arg
       if (debug_gl) log_gl("flush pending opengl calls...\n");
       if(debug_gl && nr_serial > 1) fprintf(stderr, "buffered: %d\n", nr_serial);
   
-      ret_int = call_opengl(cur_args_buffer - command_buffer, cur_ret_buf);
-      decode_ret_buffer(func_number, signature, args, command_buffer, ret_ptr);
+      ret_int = call_opengl(command_buffer, cur_args_buffer - command_buffer, cur_ret_buf, ret_buf);
+      decode_ret_buffer(func_number, signature, args, ret_buf?ret_buf:command_buffer, ret_ptr);
 
       cur_args_buffer = NULL; // Reset pointers.
 
       if(again == 2) {
+        free(command_buffer);
+	free(ret_buf);
         command_buffer = NULL;
         again = 0;
       }
@@ -334,12 +396,12 @@ static char *do_init(void)
     debug_array_ptr = getenv("DEBUG_ARRAY_PTR") != NULL;
     disable_optim = getenv("DISABLE_OPTIM") != NULL;
 
-    command_buffer = map_buffer(SIZE_BUFFER_COMMAND);
+    xfer_buffer = map_buffer(SIZE_BUFFER_COMMAND);
 
     /* special case init function - nothings set up yet... */
-    ((int*)command_buffer)[3] = _init_func;
-    call_opengl(SIZE_OUT_HEADER + sizeof(int), SIZE_IN_HEADER + sizeof(int));
-    int init_ret = ((int*)command_buffer)[1]; // ideally, check if we FAIL
+    ((int*)xfer_buffer)[3] = _init_func;
+    call_opengl(xfer_buffer, SIZE_OUT_HEADER + sizeof(int), SIZE_IN_HEADER + sizeof(int), NULL);
+    int init_ret = *(int*)(xfer_buffer + SIZE_IN_HEADER); // ideally, check if we FAIL
     if (init_ret == 0)
     {
       log_gl("You maybe forgot to launch QEMU with -enable-gl argument.\n");
@@ -371,6 +433,7 @@ static inline void buffer_args(int func_number, Signature *s, long *args, int *a
 //      fprintf(stderr, "ab_off: param %02d: %08x\n", i, args_buf-command_buffer);
       args_size_buf = (int*)args_buf;
       args_buf += sizeof(int);
+//if(func_number == _render_surface_func)
 //    fprintf(stderr, "ca: %02d - %08x\n", s->args_type[i], args_buf-*cur_args);
     switch(s->args_type[i])
     {
@@ -437,7 +500,7 @@ static inline void buffer_args(int func_number, Signature *s, long *args, int *a
           log_gl("size < 0 : func=%s, param=%d\n", tab_opengl_calls_name[func_number], i);
           exit(1);
         }
-    memcpy(args_buf, (void *)args[i], *args_size_buf); args_buf += *args_size_buf; args_size_buf++;
+        memcpy(args_buf, (void *)args[i], *args_size_buf); args_buf += *args_size_buf; args_size_buf++;
         break;
       }
 
@@ -544,7 +607,7 @@ static inline int get_args_buffer_size(int func_number, Signature *s, long *args
 
 int get_ret_buffer_size(int func_number, Signature *s, long *args, int *args_size_opt)
 {
-  int this_func_ret_size = sizeof(int); // return status
+  int this_func_ret_size = SIZE_IN_HEADER; // return status
   int i;
 
   for(i=0;i<s->nb_args;i++)
@@ -595,7 +658,7 @@ int decode_ret_buffer(int func_number, Signature *s, long *args, char *buffer, v
   int i, len;
   int ret = *(int*)cur_ptr;
 
-  cur_ptr += 4;
+  cur_ptr += SIZE_IN_HEADER;
 
   for(i=0;i<s->nb_args;i++)
   {
