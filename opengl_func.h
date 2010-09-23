@@ -112,8 +112,10 @@ typedef struct
 
 extern int tab_args_type_length[];
 
-static const int _init32_signature[] = { TYPE_INT, 0, 0 };
-static const int _init64_signature[] = { TYPE_INT, 0, 0 };
+static const int _init32_signature[] =
+    { TYPE_NONE, 1, 3, TYPE_INT, TYPE_INT, TYPE_OUT_1INT };
+static const int _init64_signature[] =
+    { TYPE_NONE, 1, 3, TYPE_INT, TYPE_INT, TYPE_OUT_1INT };
 
 static const int _changeWindowState_signature[] = {TYPE_NONE, 0, 2, TYPE_INT, TYPE_INT};
 

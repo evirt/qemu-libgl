@@ -341,10 +341,21 @@ if(req_total_buffer > 10*1024*1024) {
 
 }
 
+#define GLINIT_FAIL_ABI 3
+#define GLINIT_QUEUE 2
+#define GLINIT_NOQUEUE 1
+
+struct init_packet {
+    short func_number;
+    int version_major;
+    int version_minor;
+} __attribute__((__packed__));
+
 static char *do_init(void)
 {
   int current_thread = pthread_self();
   int i;
+    struct init_packet *pkt;
 
     /* Sanity checks */
     assert(tab_args_type_length[TYPE_OUT_128UCHAR] == 128 * sizeof(char));
@@ -399,16 +410,24 @@ static char *do_init(void)
     xfer_buffer = map_buffer(SIZE_BUFFER_COMMAND);
 
     /* special case init function - nothings set up yet... */
-    ((int*)xfer_buffer)[3] = _init_func;
-    call_opengl(xfer_buffer, SIZE_OUT_HEADER + sizeof(int), SIZE_IN_HEADER + sizeof(int), NULL);
-    int init_ret = *(int*)(xfer_buffer + SIZE_IN_HEADER); // ideally, check if we FAIL
-    if (init_ret == 0)
+    pkt = (struct init_packet*)(xfer_buffer + SIZE_OUT_HEADER);
+    pkt->func_number = _init_func;
+    pkt->version_major = 1;
+    pkt->version_minor = 0;
+    call_opengl(xfer_buffer, SIZE_OUT_HEADER + sizeof(*pkt), SIZE_IN_HEADER + sizeof(int), NULL);
+    int init_ret = *(int*)(xfer_buffer + SIZE_IN_HEADER);
+    switch(init_ret)
     {
-      log_gl("You maybe forgot to launch QEMU with -enable-gl argument.\n");
-      log_gl("exiting !\n");
-      exit(-1);
+        case GLINIT_QUEUE:
+        case GLINIT_NOQUEUE:
+            enable_gl_buffering = (init_ret == GLINIT_QUEUE) &&
+                                  !(getenv("DISABLE_GL_BUFFERING"));
+            break;
+        case GLINIT_FAIL_ABI:
+            log_gl("Incompatible ABI version\n");
+            log_gl("exiting !\n");
+            exit(-1);
     }
-    enable_gl_buffering = (init_ret == 2) && !(getenv("DISABLE_GL_BUFFERING"));
     if(debug_gl)
       fprintf(stderr, "Enable buffering: %s (%d)\n", enable_gl_buffering?"yes":"no", init_ret);
 
