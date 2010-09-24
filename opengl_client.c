@@ -420,7 +420,7 @@ static char *do_init(void)
     pkt = (struct init_packet*)(xfer_buffer + SIZE_OUT_HEADER);
     pkt->func_number = _init_func;
     pkt->version_major = 1;
-    pkt->version_minor = 0;
+    pkt->version_minor = 1;
 
     call_opengl(xfer_buffer,
                 SIZE_OUT_HEADER + sizeof(*pkt),
@@ -501,6 +501,12 @@ static inline void buffer_args(int func_number, Signature *s, long *args, int *a
                 break;
 
             CASE_OUT_LENGTH_DEPENDING_ON_PREVIOUS_ARGS:
+                memcpy(args_buf, (void *)&args[i], sizeof(int));
+                args_buf += sizeof(int);
+                *args_size_buf = compute_arg_length(func_number, s, i, args);
+                args_size_buf++;
+                break;
+
             CASE_IN_LENGTH_DEPENDING_ON_PREVIOUS_ARGS:
                 memcpy(args_buf, (void *)&args[i], sizeof(int));
                 args_buf += sizeof(int);
@@ -524,12 +530,16 @@ static inline void buffer_args(int func_number, Signature *s, long *args, int *a
                     log_gl("size < 0 : func=%s, param=%d\n", tab_opengl_calls_name[func_number], i);
                     exit(1);
                 }
-                memcpy(args_buf, (void *)args[i], *args_size_buf);
-                args_buf += *args_size_buf;
                 args_size_buf++;
                 break;
 
             CASE_OUT_KNOWN_SIZE_POINTERS:
+                memcpy(args_buf, (void *)&args[i], sizeof(int));
+                args_buf += sizeof(int);
+                *args_size_buf = tab_args_type_length[s->args_type[i]];
+                args_size_buf++;
+                break;
+
             case TYPE_DOUBLE:
             CASE_IN_KNOWN_SIZE_POINTERS:
                 memcpy(args_buf, (void *)&args[i], sizeof(int));
@@ -583,6 +593,9 @@ static inline int get_args_buffer_size(int func_number, Signature *s,
                 break;
 
             CASE_OUT_LENGTH_DEPENDING_ON_PREVIOUS_ARGS:
+                this_func_args_size += sizeof(int);
+                break;
+
             CASE_IN_LENGTH_DEPENDING_ON_PREVIOUS_ARGS:
                 this_func_args_size += sizeof(int);
                 this_func_args_size += compute_arg_length(func_number, s, i, args);
@@ -593,10 +606,12 @@ static inline int get_args_buffer_size(int func_number, Signature *s,
 
             CASE_OUT_UNKNOWN_SIZE_POINTERS:
                 this_func_args_size += sizeof(int);
-                this_func_args_size += args_size_opt[i];// + sizeof(int);
                 break;
 
             CASE_OUT_KNOWN_SIZE_POINTERS:
+                this_func_args_size += sizeof(int);
+                break;
+
             case TYPE_DOUBLE:
             CASE_IN_KNOWN_SIZE_POINTERS:
                 this_func_args_size += sizeof(int);
