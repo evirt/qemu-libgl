@@ -3,8 +3,6 @@
  *
  *  Copyright (c) 2007 Even Rouault
  *
- *  Modified by Ian Molton 2010
- *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
@@ -25,9 +23,19 @@
  */
 
 
-#ifndef _OPENGL_UTILS
-#define _OPENGL_UTILS
+#ifndef _RANGE_ALLOC
+#define _RANGE_ALLOC
 
-extern int compute_arg_length(int func_number, Signature *s, int arg_i, long* args);
+typedef struct
+{
+  unsigned int* values;
+  int nbValues;
+} RangeAllocator;
+
+extern void alloc_value(RangeAllocator* range, unsigned int value);
+extern unsigned int alloc_range(RangeAllocator* range, int n, unsigned int* values);
+extern void delete_value(RangeAllocator* range, unsigned int value);
+extern void delete_range(RangeAllocator* range, int n, const unsigned int* values);
+extern void delete_consecutive_values(RangeAllocator* range, unsigned int first, int n);
 
 #endif

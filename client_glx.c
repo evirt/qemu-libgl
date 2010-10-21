@@ -3,8 +3,6 @@
  *
  *  Copyright (c) 2006,2007 Even Rouault
  *
- *    modified by Zhiyuan Lv <zhiyuan.lv@intel.com> 2010
- *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
@@ -23,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -184,7 +183,6 @@ const char *glXQueryExtensionsString( Display *dpy, int screen )
     long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(screen) };
     do_opengl_call_no_lock(glXQueryExtensionsString_func, &ret, args, NULL);
     ret = strdup(ret);
-    removeUnwantedExtensions(ret);
   }
   UNLOCK(glXQueryExtensionsString_func);
   return ret;
@@ -298,10 +296,6 @@ const char *glXQueryServerString( Display *dpy, int screen, int name )
     long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(screen), INT_TO_ARG(name) };
     do_opengl_call_no_lock(glXQueryServerString_func, &glXQueryServerString_ret[name], args, NULL);
     glXQueryServerString_ret[name] = strdup(glXQueryServerString_ret[name]);
-    if (name == GLX_EXTENSIONS)
-    {
-      removeUnwantedExtensions(glXQueryServerString_ret[name]);
-    }
   }
   UNLOCK(glXQueryServerString_func);
   return glXQueryServerString_ret[name];
@@ -322,10 +316,6 @@ const char *glXGetClientString( Display *dpy, int name )
     }
     else
       glXGetClientString_ret[name] = strdup(glXGetClientString_ret[name]);
-    if (name == GLX_EXTENSIONS)
-    {
-      removeUnwantedExtensions(glXGetClientString_ret[name]);
-    }
   }
   UNLOCK(glXGetClientString_func);
   return glXGetClientString_ret[name];
@@ -339,7 +329,6 @@ static void _create_context(GLXContext context, GLXContext shareList)
   glstates[nbGLStates]->ref = 1;
   glstates[nbGLStates]->context = context;
   glstates[nbGLStates]->shareList = shareList;
-  glstates[nbGLStates]->pbuffer = 0;
   glstates[nbGLStates]->viewport.width = 0;
   if (shareList)
   {
@@ -365,9 +354,6 @@ static void _create_context(GLXContext context, GLXContext shareList)
 static GLXFBConfig* glXChooseFBConfig_no_lock( Display *dpy, int screen,
                                                const int *attribList, int *nitems );
 static XVisualInfo* glXGetVisualFromFBConfig_no_lock( Display *dpy, GLXFBConfig config );
-static GLXPbuffer glXCreatePbuffer_no_lock(Display *dpy,
-                                           GLXFBConfig config,
-                                           const int *attribList);
 
 GLXContext glXCreateContext( Display *dpy, XVisualInfo *vis,
                              GLXContext shareList, Bool direct )
@@ -392,63 +378,6 @@ GLXContext glXCreateContext( Display *dpy, XVisualInfo *vis,
     }
   }
 
-  if (getenv("GET_IMG_FROM_SERVER"))
-  {
-    /* If the visual is already linked to a fbconfig, there's no use to create
-        a new pbuffer ! */
-    if (!isFbConfigVisual)
-    {
-      int nitems;
-      int attribs[] = {
-          GLX_DOUBLEBUFFER,  True,
-          GLX_RED_SIZE,      1,
-          GLX_GREEN_SIZE,    1,
-          GLX_BLUE_SIZE,     1,
-          GLX_DEPTH_SIZE,    1,
-          GLX_STENCIL_SIZE, 8,
-          GLX_RENDER_TYPE,   GLX_RGBA_BIT,
-          GLX_DRAWABLE_TYPE, GLX_PBUFFER_BIT,
-          None
-      };
-
-      GLXFBConfig* fbconfig = glXChooseFBConfig_no_lock(dpy,
-                                  DefaultScreen( dpy ),
-                                  attribs,
-                                  &nitems);
-      if (NULL == fbconfig) {
-        log_gl("Error: couldn't get fbconfig\n");
-        exit(1);
-      }
-
-      XVisualInfo *visinfo = glXGetVisualFromFBConfig_no_lock(dpy, fbconfig[0]);
-      GLXContext ctxt = NULL;
-      long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(visinfo->visualid), INT_TO_ARG(shareList), INT_TO_ARG(direct) };
-      do_opengl_call_no_lock(glXCreateContext_func, &ctxt, args, NULL);
-
-      XFree(visinfo);
-
-      if (ctxt)
-      {
-        _create_context(ctxt, shareList);
-
-        int pbufAttrib[] = {
-          GLX_PBUFFER_WIDTH,   1024,
-          GLX_PBUFFER_HEIGHT,  1024,
-          GLX_LARGEST_PBUFFER, GL_TRUE,
-          None
-        };
-
-        glstates[nbGLStates-1]->isAssociatedToFBConfigVisual = isFbConfigVisual;
-        glstates[nbGLStates-1]->pbuffer = glXCreatePbuffer_no_lock(dpy, fbconfig[0], pbufAttrib);
-        assert(glstates[nbGLStates-1]->pbuffer);
-      }
-
-      XFree(fbconfig);
-
-      goto end_of_create_context;
-    }
-  }
-
   GLXContext ctxt = NULL;
   if (i == nEltTabAssocVisualInfoVisualId)
   {
@@ -463,7 +392,7 @@ GLXContext glXCreateContext( Display *dpy, XVisualInfo *vis,
     _create_context(ctxt, shareList);
     glstates[nbGLStates-1]->isAssociatedToFBConfigVisual = isFbConfigVisual;
   }
-end_of_create_context:
+
   UNLOCK(glXCreateContext_func);
   return ctxt;
 }
@@ -484,7 +413,6 @@ GLXDrawable glXGetCurrentDrawable (void)
 
 static void _free_context(Display* dpy, int i, GLState* state)
 {
-  if (state->pbuffer) glXDestroyPbuffer(dpy, state->pbuffer);
   free(state->last_cursor.pixels);
   free(state->ownTextureAllocator.values);
   free(state->ownBufferAllocator.values);
@@ -556,52 +484,168 @@ Bool glXQueryVersion( Display *dpy, int *maj, int *min )
 }
 
 
-static void _get_window_pos(Display *dpy, Window win, WindowPosStruct* pos)
+static void _get_window_info(Display *dpy, Window win, WindowInfoStruct* info)
 {
-  XWindowAttributes window_attributes_return;
-  Window child;
-  int x, y;
-  Window root = DefaultRootWindow(dpy);
-  XGetWindowAttributes(dpy, win, &window_attributes_return);
-  XTranslateCoordinates(dpy, win, root, 0, 0, &x, &y, &child);
-  /*printf("%d %d %d %d\n", x, y, window_attributes_return.width, window_attributes_return.height);*/
-  pos->x = x;
-  pos->y = y;
-  pos->width = window_attributes_return.width;
-  pos->height = window_attributes_return.height;
-  pos->map_state = window_attributes_return.map_state;
+  XWindowAttributes attr;
+
+  XGetWindowAttributes(dpy, win, &attr);
+
+  info->width     = attr.width;
+  info->height    = attr.height;
+  info->map_state = attr.map_state;
+}
+
+static RendererData *renderer_create_image(Display *dpy, int w, int h)
+{
+  RendererData *rdata = calloc(1, sizeof(*rdata));
+
+  if(!rdata)
+    goto out;
+
+  rdata->w = w;
+  rdata->h = h;
+
+  rdata->image = XShmCreateImage(dpy, DefaultVisual(dpy, 0), 24, ZPixmap, NULL,
+                                 &rdata->shminfo, w, h);
+  
+  if(!rdata->image)
+    goto out_try_non_shm;
+
+  rdata->shminfo.shmid = shmget(IPC_PRIVATE, rdata->image->bytes_per_line * h,
+                                IPC_CREAT | 0777);
+  if(rdata->shminfo.shmid == -1) {
+    goto out_destroy_img;
+  }
+
+  rdata->shminfo.shmaddr = shmat(rdata->shminfo.shmid, NULL,0);
+  if(rdata->shminfo.shmaddr == (void*)-1)
+    goto out_shmput;
+
+  rdata->buffer = rdata->shminfo.shmaddr;
+  rdata->image->data = rdata->buffer;
+  rdata->shminfo.readOnly = False;
+  rdata->use_shm = 1;
+
+  XShmAttach(dpy, &rdata->shminfo);
+  XSync(dpy, 0);
+
+  memset(rdata->buffer, 0, rdata->image->bytes_per_line * h);
+
+  return rdata;
+
+out_shmput:
+  shmctl(rdata->shminfo.shmid, IPC_RMID, NULL);
+out_destroy_img:
+  XDestroyImage(rdata->image);
+out_try_non_shm:
+  // Fallback path
+  rdata->image = XCreateImage(dpy, DefaultVisual(dpy, 0), 24, ZPixmap, 0, NULL, w, h, 32, 0);
+  if(rdata->image) {
+    rdata->buffer = calloc(1, (rdata->image->bytes_per_line) * h);
+    if(rdata->buffer) {
+      rdata->image->data = rdata->buffer;
+      return rdata;
+    }
+  }
+  XDestroyImage(rdata->image);
+  free(rdata);
+out:
+  return NULL;
+}
+
+static void renderer_destroy_image(Display *dpy, RendererData *rdata) {
+  if(!rdata) {
+    return;
+  }
+  if(rdata->use_shm)
+    XShmDetach(dpy, &rdata->shminfo);
+  else
+    free(rdata->image->data);
+
+  rdata->image->data = NULL;
+  XDestroyImage(rdata->image);
+
+  if(rdata->use_shm) {
+    shmdt(rdata->shminfo.shmaddr);
+    shmctl(rdata->shminfo.shmid, IPC_RMID, NULL);
+  }
+  free(rdata);
 }
 
 #define MAX_PBUFFERS 100
 
-/* Doit être appelé avec le lock */
-static void _move_win_if_necessary(Display *dpy, Window win)
+/* Do this only with lock held */
+static inline void _request_host_resize(Display *dpy, Window win, GLState *state, int w, int h)
 {
+    if(state->renderer_data)
+      renderer_destroy_image(dpy, state->renderer_data);
+
+    state->renderer_data = renderer_create_image(dpy, w, h);
+
+    long args[] = { INT_TO_ARG(win), INT_TO_ARG(w), INT_TO_ARG(h)};
+    do_opengl_call_no_lock(_resize_surface_func, NULL, args, 0);
+}
+
+static void _update_renderer(Display *dpy, Window win) {
   GET_CURRENT_STATE();
-  if ((int)win < MAX_PBUFFERS) /* FIXME */
-  {
+  WindowInfoStruct info;
+  WindowInfoStruct *old_info = &state->last_win_state;
+
+  if(!win)
     return;
+
+  _get_window_info(dpy, win, &info);
+
+  if(info.map_state != IsViewable) {
+    if(state->renderer_data);
+      renderer_destroy_image(dpy, state->renderer_data);
+    state->renderer_data = NULL;
+    goto out;
   }
 
-  WindowPosStruct pos;
-  _get_window_pos(dpy, win, &pos);
-  if (memcmp(&pos, &state->oldPos, sizeof(state->oldPos)) != 0)
-  {
-    if (pos.map_state != state->oldPos.map_state ||
-                    pos.map_state != IsViewable)
-    {
-      /* Hack: since we can't request a callback at the precise moment
-       * the window becomes visible, make it always visible, otherwise
-       * if during a glXSwapBuffers the windows is not visible, we can't
-       * send the event up until the next glXSwapBuffers.  */
-      /* long args[] = { INT_TO_ARG(win), INT_TO_ARG(pos.map_state) }; */
-      long args[] = { INT_TO_ARG(win), IsViewable };
-      do_opengl_call_no_lock(_changeWindowState_func, NULL, args, NULL);
-    }
-    memcpy(&state->oldPos, &pos, sizeof(state->oldPos));
-    long args[] = { INT_TO_ARG(win), POINTER_TO_ARG(&pos) };
-    do_opengl_call_no_lock(_moveResizeWindow_func, NULL, args, NULL);
+  if(!state->renderer_data) {
+    state->renderer_data = renderer_create_image(dpy, info.width, info.height);
+    _request_host_resize(dpy, win, state, info.width, info.height);
+    goto out;
   }
+
+  if ((info.width != old_info->width) || (info.height != old_info->height)) {
+    _request_host_resize(dpy, win, state, info.width, info.height);
+    goto out;
+  }
+
+  //fprintf(stderr, "render: win: %08x w: %d h: %d stride: %d\n", win, state->renderer_data->w, state->renderer_data->h, state->renderer_data->image->bytes_per_line);
+
+// Actually render stuff
+  long args[] = { INT_TO_ARG(win), INT_TO_ARG(state->renderer_data->image->bits_per_pixel), INT_TO_ARG(state->renderer_data->image->bytes_per_line), POINTER_TO_ARG(state->renderer_data->buffer)};
+  int args_size[] = {0, 0, 0, state->renderer_data->image->bytes_per_line*state->renderer_data->h};
+  do_opengl_call_no_lock(_render_surface_func, NULL, args, args_size);
+
+  /* draw into window */
+  if(state->renderer_data->use_shm)
+    XShmPutImage(dpy, win, DefaultGC(dpy, 0), state->renderer_data->image,
+                 0, 0, 0, 0, state->renderer_data->w, state->renderer_data->h,
+                 False);
+  else 
+    XPutImage(dpy, win, DefaultGC(dpy, 0), state->renderer_data->image, 0, 0,
+              0, 0, state->renderer_data->w, state->renderer_data->h);
+
+  XFlush(dpy);
+
+#if 0
+  do {
+    char filename[50];
+    FILE *f;
+
+    sprintf(filename, "/home/ian/dump_%08x.rgb", win);
+    f = fopen(filename, "wb");
+    fwrite(state->renderer_data->buffer, state->renderer_data->image->bytes_per_line*state->renderer_data->h, 1, f);
+    fclose(f);
+  } while(0);
+#endif
+
+out:
+  memcpy(old_info, &info, sizeof(info));
 }
 
 Bool glXMakeCurrent_no_lock( Display *dpy, GLXDrawable drawable, GLXContext ctx)
@@ -634,40 +678,12 @@ Bool glXMakeCurrent_no_lock( Display *dpy, GLXDrawable drawable, GLXContext ctx)
     }
   }
 
-  if (getenv("GET_IMG_FROM_SERVER") && ctx != NULL)
-  {
-    for(i=0; i<nbGLStates; i++)
-    {
-      if (glstates[i]->context == ctx)
-      {
-        if (glstates[i]->pbuffer)
-        {
-          long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(glstates[i]->pbuffer), INT_TO_ARG(ctx) };
-          do_opengl_call_no_lock(glXMakeCurrent_func, NULL /*&ret*/, args, NULL);
-          ret = True;
-        }
-        else
-        {
-          long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(drawable), INT_TO_ARG(ctx) };
-          do_opengl_call_no_lock(glXMakeCurrent_func, NULL /*&ret*/, args, NULL);
-          ret = True;
-          _move_win_if_necessary(dpy, drawable);
-        }
-        break;
-      }
-    }
-    if (i == nbGLStates)
-    {
-      log_gl("unknown context %p\n", ctx);
-    }
-  }
-  else
   {
     //log_gl("glXMakeCurrent %d %d\n", drawable, ctx);
     long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(drawable), INT_TO_ARG(ctx) };
     do_opengl_call_no_lock(glXMakeCurrent_func, NULL /*&ret*/, args, NULL);
     ret = True;
-    _move_win_if_necessary(dpy, drawable);
+    //_update_renderer(dpy, drawable);
   }
 
   if (ret)
@@ -845,123 +861,13 @@ end_of_glx_get_config:
   return ret;
 }
 
-/* Doit être appelé avec le lock */
-static void _send_cursor(Display* dpy, Window win)
-{
-  GET_CURRENT_STATE();
-  XFixesCursorImage* cursor = XFixesGetCursorImage(dpy);
-  Window child_return, root_return;
-  int root_x_return, root_y_return, win_x_return, win_y_return;
-  unsigned int mask_return;
-  XQueryPointer(dpy, win, &root_return, &child_return, &root_x_return, &root_y_return,
-                &win_x_return, &win_y_return, &mask_return);
-  cursor->x = win_x_return;
-  cursor->y = win_y_return;
-
-
-  if (cursor->width == state->last_cursor.width &&
-      cursor->height == state->last_cursor.height &&
-      cursor->xhot == state->last_cursor.xhot &&
-      cursor->yhot == state->last_cursor.yhot &&
-      memcmp(cursor->pixels, state->last_cursor.pixels, sizeof(long) * cursor->width * cursor->height) == 0)
-  {
-    if (!(cursor->x == state->last_cursor.x &&
-          cursor->y == state->last_cursor.y))
-    {
-      long args[] = { INT_TO_ARG(cursor->x), INT_TO_ARG(cursor->y),
-                      INT_TO_ARG(cursor->width), INT_TO_ARG(cursor->height),
-                      INT_TO_ARG(cursor->xhot), INT_TO_ARG(cursor->yhot),
-                      0 };
-      int args_size[] = { 0, 0, 0, 0, 0, 0, 0 };
-      do_opengl_call_no_lock(_send_cursor_func, NULL, CHECK_ARGS(args, args_size));
-
-      state->last_cursor.x = cursor->x;
-      state->last_cursor.y = cursor->y;
-    }
-    XFree(cursor);
-    return;
-  }
-  int* data;
-
-  /* Fun stuff about the 'pixels' field of XFixesCursorImage. It's a long instead of an int */
-  /* The interface chosen for serialization is an array of int */
-  if (sizeof(long) != sizeof(int))
-  {
-    data = malloc(sizeof(int) * cursor->width * cursor->height);
-    int i;
-    for(i=0;i<cursor->width*cursor->height;i++)
-    {
-      data[i] = (int)cursor->pixels[i];
-    }
-  }
-  else
-  {
-    data = (int*)cursor->pixels;
-  }
-
-  long args[] = { INT_TO_ARG(cursor->x), INT_TO_ARG(cursor->y),
-                  INT_TO_ARG(cursor->width), INT_TO_ARG(cursor->height),
-                  INT_TO_ARG(cursor->xhot), INT_TO_ARG(cursor->yhot),
-                  POINTER_TO_ARG(data) };
-  int args_size[] = { 0, 0, 0, 0, 0, 0, sizeof(int) * cursor->width * cursor->height };
-  do_opengl_call_no_lock(_send_cursor_func, NULL, CHECK_ARGS(args, args_size));
-
-  void* prev_ptr = state->last_cursor.pixels;
-  memcpy(&state->last_cursor, cursor, sizeof(XFixesCursorImage));
-  state->last_cursor.pixels = realloc(prev_ptr, sizeof(long) * cursor->width * cursor->height);
-  memcpy(state->last_cursor.pixels, cursor->pixels, sizeof(long) * cursor->width * cursor->height);
-
-  if (sizeof(long) != sizeof(int))
-  {
-    free(data);
-  }
-  XFree(cursor);
-}
-
 void glXSwapBuffers_no_lock( Display *dpy, GLXDrawable drawable )
 {
   //log_gl("glXSwapBuffers %d\n", drawable);
-  GET_CURRENT_STATE();
   long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(drawable) };
   do_opengl_call_no_lock(glXSwapBuffers_func, NULL, args, NULL);
-  if (getenv("GET_IMG_FROM_SERVER") == NULL)
-  {
-    _move_win_if_necessary(dpy, drawable);
-  }
-  _send_cursor(dpy, drawable);
 
-  // copy image data from host to drawable.
-  {
-    XWindowAttributes watt;
-    XGetWindowAttributes(dpy, drawable, &watt);
-    int drawable_width = watt.width;
-    int drawable_height = watt.height;
-
-    char* buf = malloc(4 * drawable_width * drawable_height);
-    long my_args[] = { INT_TO_ARG(args[1]), POINTER_TO_ARG(buf) };
-    int my_args_size[] = {0, 4 * drawable_width * drawable_height};
-    do_opengl_call_no_lock(_get_imagedata_func, NULL, CHECK_ARGS(my_args, my_args_size));
-
-    XImage* img = XCreateImage(dpy, 0, 24, ZPixmap, 0, buf, drawable_width, drawable_height, 8, 0);
-    GC gc = DefaultGC(dpy, DefaultScreen(dpy));
-    XPutImage(dpy, drawable, gc, img, 0, 0, 0, 0, drawable_width, drawable_height);
-    XDestroyImage(img);
-  }
-
-  if (limit_fps > 0)
-  {
-    if (state->last_swap_buffer_time.tv_sec != 0)
-    {
-      struct timeval current_time;
-      gettimeofday(&current_time, NULL);
-      int diff_time = (current_time.tv_sec - state->last_swap_buffer_time.tv_sec) * 1000 + (current_time.tv_usec - state->last_swap_buffer_time.tv_usec) / 1000;
-      if (diff_time < 1000 / limit_fps)
-      {
-        usleep( (1000 / limit_fps - diff_time) * 900);
-      }
-    }
-    gettimeofday(&state->last_swap_buffer_time, NULL);
-  }
+  _update_renderer(dpy, drawable);
 }
 
 GLAPI void APIENTRY glXSwapBuffers( Display *dpy, GLXDrawable drawable )
@@ -1035,29 +941,6 @@ GLAPI GLXFBConfig* APIENTRY glXChooseFBConfig( Display *dpy, int screen,
   fbconfig = glXChooseFBConfig_no_lock(dpy, screen, attribList, nitems);
   UNLOCK(glXChooseFBConfig_func);
   return fbconfig;
-}
-
-GLAPI GLXFBConfigSGIX* APIENTRY glXChooseFBConfigSGIX( Display *dpy, int screen,
-                                    const int *attribList, int *nitems )
-{
-  CHECK_PROC_WITH_RET(glXChooseFBConfigSGIX);
-  GLXFBConfigSGIX* fbConfig = NULL;
-  if (debug_gl) log_gl("glXChooseFBConfigSGIX\n");
-  int i = 0;
-  int ret = 0;
-  int emptyAttribList = None;
-  if (attribList == NULL) attribList = &emptyAttribList;
-  long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(screen), POINTER_TO_ARG(attribList), POINTER_TO_ARG(nitems) };
-  int args_size[] = { 0, 0, sizeof(int) * _compute_length_of_attrib_list_including_zero(attribList, 1), 0 };
-  do_opengl_call(glXChooseFBConfigSGIX_func, &ret, args, args_size);
-  if (debug_gl) log_gl("nitems = %d\n", *nitems);
-  fbConfig = malloc(sizeof(GLXFBConfigSGIX) * (*nitems));
-  for(i=0;i<*nitems;i++)
-  {
-    fbConfig[i] = (GLXFBConfig)(long)(ret + i);
-    if (debug_gl && (i == 0 || i == *nitems-1)) log_gl("config %d = %d\n", i, ret+i);
-  }
-  return fbConfig;
 }
 
 GLAPI GLXFBConfig* APIENTRY glXGetFBConfigs( Display *dpy, int screen, int *nitems )
@@ -1172,22 +1055,6 @@ end_of_glx_get_fb_config_attrib:
   return ret;
 }
 
-GLAPI int APIENTRY glXGetFBConfigAttribSGIX(Display *dpy, GLXFBConfigSGIX config, int attribute, int *value)
-{
-  CHECK_PROC_WITH_RET(glXGetFBConfigAttribSGIX);
-  int ret = 0;
-  long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(config), INT_TO_ARG(attribute), POINTER_TO_ARG(value) };
-  do_opengl_call(glXGetFBConfigAttribSGIX_func, &ret, args, NULL);
-  if (debug_gl)
-  {
-    if (attribute < 0x20)
-      log_gl("glXGetFBConfigAttribSGIX %p %d = %d\n", (void*)config, attribute, *value);
-    else
-      log_gl("glXGetFBConfigAttribSGIX %p 0x%X = %d\n", (void*)config, attribute, *value);
-  }
-  return ret;
-}
-
 GLAPI int APIENTRY glXQueryContext( Display *dpy, GLXContext ctx, int attribute, int *value )
 {
   CHECK_PROC_WITH_RET(glXQueryContext);
@@ -1202,108 +1069,6 @@ GLAPI void APIENTRY glXQueryDrawable( Display *dpy, GLXDrawable draw, int attrib
   CHECK_PROC(glXQueryDrawable);
   long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(draw), INT_TO_ARG(attribute), POINTER_TO_ARG(value) };
   do_opengl_call(glXQueryDrawable_func, NULL, args, NULL);
-}
-
-GLAPI int APIENTRY glXQueryGLXPbufferSGIX( Display *dpy, GLXPbufferSGIX pbuf, int attribute, unsigned int *value )
-{
-  CHECK_PROC_WITH_RET(glXQueryGLXPbufferSGIX);
-  int ret = 0;
-  long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(pbuf), INT_TO_ARG(attribute), POINTER_TO_ARG(value) };
-  do_opengl_call(glXQueryGLXPbufferSGIX_func, &ret, args, NULL);
-  return ret;
-}
-
-static GLXPbuffer glXCreatePbuffer_no_lock(Display *dpy,
-                                           GLXFBConfig config,
-                                           const int *attribList)
-{
-  CHECK_PROC_WITH_RET(glXCreatePbuffer);
-  if (debug_gl) log_gl("glXCreatePbuffer %p\n", (void*)config);
-
-  GLXPbuffer pbuffer;
-  long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(config), POINTER_TO_ARG(attribList) };
-  int args_size[] = { 0, 0, sizeof(int) * _compute_length_of_attrib_list_including_zero(attribList, 1)};
-  do_opengl_call_no_lock(glXCreatePbuffer_func, &pbuffer, args, args_size);
-
-  return pbuffer;
-}
-
-GLAPI GLXPbuffer APIENTRY glXCreatePbuffer(Display *dpy,
-                                           GLXFBConfig config,
-                                           const int *attribList)
-{
-  GLXPbuffer pbuffer;
-  LOCK(glXCreatePbuffer_func);
-  pbuffer = glXCreatePbuffer_no_lock(dpy, config, attribList);
-  UNLOCK(glXCreatePbuffer_func);
-  return pbuffer;
-}
-
-GLAPI GLXPbufferSGIX APIENTRY glXCreateGLXPbufferSGIX( Display *dpy,
-                                                       GLXFBConfigSGIX config,
-                                                       unsigned int width,
-                                                       unsigned int height,
-                                                       int *attribList )
-{
-  CHECK_PROC_WITH_RET(glXCreateGLXPbufferSGIX);
-  if (debug_gl) log_gl("glXCreateGLXPbufferSGIX %p\n", (void*)config);
-
-  GLXPbufferSGIX pbuffer;
-  long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(config), INT_TO_ARG(width), INT_TO_ARG(height), POINTER_TO_ARG(attribList) };
-  int args_size[] = { 0, 0, 0, 0, sizeof(int) * _compute_length_of_attrib_list_including_zero(attribList, 1)};
-  do_opengl_call(glXCreateGLXPbufferSGIX_func, &pbuffer, args, args_size);
-
-  return pbuffer;
-}
-
-void glXBindTexImageATI(Display *dpy, GLXPbuffer pbuffer, int buffer)
-{
-  CHECK_PROC(glXBindTexImageATI);
-  long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(pbuffer), INT_TO_ARG(buffer) };
-  do_opengl_call(glXBindTexImageATI_func, NULL, args, NULL);
-}
-
-void glXReleaseTexImageATI(Display *dpy, GLXPbuffer pbuffer, int buffer)
-{
-  CHECK_PROC(glXReleaseTexImageATI);
-  long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(pbuffer), INT_TO_ARG(buffer) };
-  do_opengl_call(glXReleaseTexImageATI_func, NULL, args, NULL);
-}
-
-Bool glXBindTexImageARB(Display *dpy, GLXPbuffer pbuffer, int buffer)
-{
-  Bool ret = 0;
-  CHECK_PROC_WITH_RET(glXBindTexImageARB);
-  long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(pbuffer), INT_TO_ARG(buffer) };
-  do_opengl_call(glXBindTexImageARB_func, &ret, args, NULL);
-  return ret;
-}
-
-Bool glXReleaseTexImageARB(Display *dpy, GLXPbuffer pbuffer, int buffer)
-{
-  Bool ret = 0;
-  CHECK_PROC_WITH_RET(glXReleaseTexImageARB);
-  long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(pbuffer), INT_TO_ARG(buffer) };
-  do_opengl_call(glXReleaseTexImageARB_func, &ret, args, NULL);
-  return ret;
-}
-
-GLAPI void APIENTRY glXDestroyPbuffer(Display* dpy, GLXPbuffer pbuffer)
-{
-  CHECK_PROC(glXDestroyPbuffer);
-  if (debug_gl) log_gl("glXDestroyPbuffer %d\n", (int)pbuffer);
-
-  long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(pbuffer) };
-  do_opengl_call(glXDestroyPbuffer_func, NULL, args, NULL);
-}
-
-GLAPI void APIENTRY glXDestroyGLXPbufferSGIX(Display* dpy, GLXPbufferSGIX pbuffer)
-{
-  CHECK_PROC(glXDestroyGLXPbufferSGIX);
-  if (debug_gl) log_gl("glXDestroyGLXPbufferSGIX %d\n", (int)pbuffer);
-
-  long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(pbuffer) };
-  do_opengl_call(glXDestroyGLXPbufferSGIX_func, NULL, args, NULL);
 }
 
 static XVisualInfo* glXGetVisualFromFBConfig_no_lock( Display *dpy, GLXFBConfig config )
@@ -1375,17 +1140,6 @@ GLAPI GLXContext APIENTRY glXCreateNewContext(Display * dpy,
   if (ctxt)
   {
     _create_context(ctxt, shareList);
-    if (getenv("GET_IMG_FROM_SERVER"))
-    {
-      int pbufAttrib[] = {
-        GLX_PBUFFER_WIDTH,   1024,
-        GLX_PBUFFER_HEIGHT,  1024,
-        GLX_LARGEST_PBUFFER, GL_TRUE,
-        None
-      };
-      glstates[nbGLStates-1]->pbuffer = glXCreatePbuffer(dpy, fbconfig, pbufAttrib);
-      assert(glstates[nbGLStates-1]->pbuffer);
-    }
   }
   UNLOCK(glXCreateNewContext_func);
   return ctxt;
@@ -1411,26 +1165,11 @@ GLAPI Bool APIENTRY glXMakeContextCurrent( Display *dpy, GLXDrawable draw,
   return ret;
 }
 
-GLAPI GLXContext APIENTRY glXCreateContextWithConfigSGIX( Display *dpy,
-                                           GLXFBConfigSGIX config,
-                                           int renderType,
-                                           GLXContext shareList,
-                                           Bool direct )
-{
-  CHECK_PROC_WITH_RET(glXCreateContextWithConfigSGIX);
-  if (debug_gl) log_gl("glXCreateContextWithConfigSGIX %p\n", (void*)config);
-
-  GLXContext ctxt;
-  long args[] = { POINTER_TO_ARG(dpy), INT_TO_ARG(config), INT_TO_ARG(renderType), INT_TO_ARG(shareList),
-    INT_TO_ARG(direct) };
-    do_opengl_call(glXCreateContextWithConfigSGIX_func, &ctxt, args, NULL);
-  return ctxt;
-}
-
 GLAPI GLXWindow APIENTRY glXCreateWindow( Display *dpy, GLXFBConfig config, Window win, const int *attribList )
 {
   CHECK_PROC_WITH_RET(glXCreateWindow);
   /* do nothing. Not sure about this implementation. FIXME */
+  fprintf(stderr, "createwindow?\n");
   return win;
 }
 
@@ -3220,33 +2959,25 @@ static const char* global_glXGetProcAddress_request =
 "glXBindHyperpipeSGIX\0"
 "glXBindSwapBarrierNV\0"
 "glXBindSwapBarrierSGIX\0"
-"glXBindTexImageARB\0"
-"glXBindTexImageATI\0"
 "glXBindTexImageEXT\0"
 "glXBindVideoImageNV\0"
 "glXChannelRectSGIX\0"
 "glXChannelRectSyncSGIX\0"
 "glXChooseFBConfig\0"
-"glXChooseFBConfigSGIX\0"
 "glXChooseVisual\0"
 "glXCopyContext\0"
 "glXCopySubBufferMESA\0"
 "glXCreateContext\0"
-"glXCreateContextWithConfigSGIX\0"
-"glXCreateGLXPbufferSGIX\0"
 "glXCreateGLXPixmap\0"
 "glXCreateGLXPixmapMESA\0"
 "glXCreateGLXPixmapWithConfigSGIX\0"
 "glXCreateNewContext\0"
-"glXCreatePbuffer\0"
 "glXCreatePixmap\0"
 "glXCreateWindow\0"
 "glXCushionSGI\0"
 "glXDestroyContext\0"
-"glXDestroyGLXPbufferSGIX\0"
 "glXDestroyGLXPixmap\0"
 "glXDestroyHyperpipeConfigSGIX\0"
-"glXDestroyPbuffer\0"
 "glXDestroyPixmap\0"
 "glXDestroyWindow\0"
 "glXDrawableAttribARB\0"
@@ -3266,7 +2997,6 @@ static const char* global_glXGetProcAddress_request =
 "glXGetCurrentReadDrawableSGI\0"
 "glXGetDriverConfig\0"
 "glXGetFBConfigAttrib\0"
-"glXGetFBConfigAttribSGIX\0"
 "glXGetFBConfigFromVisualSGIX\0"
 "glXGetFBConfigs\0"
 "glXGetMemoryOffsetMESA\0"
@@ -3302,7 +3032,6 @@ static const char* global_glXGetProcAddress_request =
 "glXQueryExtension\0"
 "glXQueryExtensionsString\0"
 "glXQueryFrameCountNV\0"
-"glXQueryGLXPbufferSGIX\0"
 "glXQueryHyperpipeAttribSGIX\0"
 "glXQueryHyperpipeBestAttribSGIX\0"
 "glXQueryHyperpipeConfigSGIX\0"
@@ -3313,8 +3042,6 @@ static const char* global_glXGetProcAddress_request =
 "glXQuerySwapGroupNV\0"
 "glXQueryVersion\0"
 "glXReleaseBuffersMESA\0"
-"glXReleaseTexImageARB\0"
-"glXReleaseTexImageATI\0"
 "glXReleaseTexImageEXT\0"
 "glXReleaseVideoDeviceNV\0"
 "glXReleaseVideoImageNV\0"
