@@ -5646,6 +5646,11 @@ GLAPI void APIENTRY EXT_FUNC(glGetProgramInfoLog)(GLuint program,
   CHECK_PROC(glGetProgramInfoLog);
   int fake_length;
   if (length == NULL) length = &fake_length;
+#if 1 //workaround the too big maxLength
+  if (maxLength > 1024) {
+    maxLength = 1024;
+  }
+#endif  
   long args[] = { INT_TO_ARG(program), INT_TO_ARG(maxLength), POINTER_TO_ARG(length), POINTER_TO_ARG(infoLog) };
   int args_size[] = { 0, 0, sizeof(int), maxLength };
   do_opengl_call(glGetProgramInfoLog_func, NULL, CHECK_ARGS(args, args_size));
