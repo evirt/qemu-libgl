@@ -5600,6 +5600,10 @@ static void _glShaderSource(int func_number, GLhandleARB handle, GLsizei size, c
   {
     char* str_tmp = all_progs + acc_length;
     memcpy(str_tmp, tab_prog[i], my_tab_length[i]);
+    // TODO: Is it a problem here? The assignment of "0" will be erased by the next memcpy
+    //      which will cause the string not ending with zero. But since the glShaderSource
+    //      has array recording the length of each line of program, that might not be an issue.
+    //      Need check further.
     str_tmp[my_tab_length[i]] = 0;
     if (debug_gl) log_gl("glShaderSource[%d] : %s\n", i, str_tmp);
     char* version_ptr = strstr(str_tmp, "#version");
