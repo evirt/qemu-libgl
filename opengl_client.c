@@ -661,9 +661,11 @@ int get_ret_buffer_size(int func_number, Signature *s, long *args,
             this_func_ret_size += 32768;
             break;
         case TYPE_INT:
+        case TYPE_UNSIGNED_INT:
             this_func_ret_size += 4;
             break;
         case TYPE_CHAR:
+        case TYPE_UNSIGNED_CHAR:
             this_func_ret_size += 1;
             break;
     }
@@ -699,9 +701,11 @@ int decode_ret_buffer(int func_number, Signature *s, long *args, char *buffer, v
                 *(char**)ret_ptr = cur_ptr;
                 break;
             case TYPE_INT:
+            case TYPE_UNSIGNED_INT:
                 memcpy(ret_ptr, cur_ptr, 4);
                 break;
             case TYPE_CHAR:
+            case TYPE_UNSIGNED_CHAR:
                 *(char*)ret_ptr = *cur_ptr;
                 break;
         }
