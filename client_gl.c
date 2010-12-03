@@ -5600,10 +5600,6 @@ static void _glShaderSource(int func_number, GLhandleARB handle, GLsizei size, c
   {
     char* str_tmp = all_progs + acc_length;
     memcpy(str_tmp, tab_prog[i], my_tab_length[i]);
-    // TODO: Is it a problem here? The assignment of "0" will be erased by the next memcpy
-    //      which will cause the string not ending with zero. But since the glShaderSource
-    //      has array recording the length of each line of program, that might not be an issue.
-    //      Need check further.
     str_tmp[my_tab_length[i]] = 0;
     if (debug_gl) log_gl("glShaderSource[%d] : %s\n", i, str_tmp);
     char* version_ptr = strstr(str_tmp, "#version");
@@ -5650,11 +5646,6 @@ GLAPI void APIENTRY EXT_FUNC(glGetProgramInfoLog)(GLuint program,
   CHECK_PROC(glGetProgramInfoLog);
   int fake_length;
   if (length == NULL) length = &fake_length;
-#if 1 //workaround the too big maxLength
-  if (maxLength > 1024) {
-    maxLength = 1024;
-  }
-#endif  
   long args[] = { INT_TO_ARG(program), INT_TO_ARG(maxLength), POINTER_TO_ARG(length), POINTER_TO_ARG(infoLog) };
   int args_size[] = { 0, 0, sizeof(int), maxLength };
   do_opengl_call(glGetProgramInfoLog_func, NULL, CHECK_ARGS(args, args_size));
