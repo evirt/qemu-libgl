@@ -668,6 +668,10 @@ int get_ret_buffer_size(int func_number, Signature *s, long *args,
         case TYPE_UNSIGNED_CHAR:
             this_func_ret_size += 1;
             break;
+        default:
+            log_gl("Unexpected return arg type %d !\n", s->ret_type);
+            exit(-1);
+            break;
     }
 
     return this_func_ret_size;
@@ -707,6 +711,10 @@ int decode_ret_buffer(int func_number, Signature *s, long *args, char *buffer, v
             case TYPE_CHAR:
             case TYPE_UNSIGNED_CHAR:
                 *(char*)ret_ptr = *cur_ptr;
+                break;
+            default:
+                log_gl("Unexpected return arg type %d !\n", s->ret_type);
+                exit(-1);
                 break;
         }
     }
